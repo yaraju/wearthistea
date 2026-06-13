@@ -1,0 +1,81 @@
+// wearthistea — data model (Phase 1)
+// Persistence: PostgreSQL (Neon). Set DATABASE_URL in .env, then run:
+//   npx prisma db push
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// One "spill" = one keyword run that produced a batch of design options.
+model Batch {
+  id        String   @id @default(cuid())
+  keyword   String
+  status    String   @default("generated") // generated | queued | done
+  createdAt DateTime @default(now())
+  designs   Design[]
+}
+
+// A single generated t-shirt concept (text + product shot + clean print file).
+model Design {
+  id            String  @id @default(cuid())
+  batchId       String
+  batch         Batch   @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  // Creative content (from the LLM)
+  title         String
+  phrase        String
+  visualConcept String  @db.Text
+  vibe          String?
+  blurb         String?
+
+  // The exact prompts used to make the images (handy for re-rolls / debugging)
+  designPrompt  String  @db.Text
+  productPrompt String  @db.Text
+
+  // Stored artwork (paths under /public, served at the same URL)
+  productImagePath String // styled product mockup shown in the grid
+  designImagePath  String // clean, print-ready art sent to Printify
+
+  // Lifecycle: generated -> pending (queued for approval) -> approved -> published | rejected | failed
+  status        String  @default("generated")
+  selected      Boolean @default(false)
+
+  // ── Order details ──────────────────────────────────────────────────────────
+  // Captured when a visitor picks this design on the landing page. Drives the
+  // fulfillment order placed on approval (Printrove).
+  variantSize    String?
+  variantColor   String?
+  quantity       Int     @default(1)
+  cod            Boolean @default(true)
+
+  recipientName  String?
+  recipientEmail String?
+  recipientPhone String?
+  addressLine1   String?
+  addressLine2   String?
+  addressLine3   String?
+  city           String?
+  state          String?
+  pincode        String?
+  country        String?
+
+  // ── Fulfillment results (provider-agnostic) ────────────────────────────────
+  // printifyProductId / printifyUrl are reused generically across providers:
+  // they hold the active provider's product id and storefront/tracking URL.
+  priceCents        Int?
+  printifyProductId String?
+  printifyUrl       String?
+  providerOrderId   String?
+  trackingNumber    String?
+  errorMessage      String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([batchId])
+}

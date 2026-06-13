@@ -1,0 +1,64 @@
+{
+  "project_slug": "wearthistea",
+  "created_standalone": true,
+  "note": "Created during Stage 03 (competitive-analysis). Stages 01-evaluate-idea and 02-validate-demand were not run; wedge and target customer are reconstructed assumptions. Run 01/02 to lock them.",
+  "last_updated": "2026-06-14T00:00:00Z",
+  "next_recommended_stage": "03b-research-market",
+  "locked_defaults": {
+    "markets": ["US", "UK", "CA", "AU", "global-english"],
+    "markets_note": "[ASSUMPTION] US-first; not derived from a stage-01 lock."
+  },
+  "stages": {
+    "01-evaluate-idea": { "status": "not_run" },
+    "02-validate-demand": { "status": "not_run" },
+    "03-competitive-analysis": {
+      "status": "complete",
+      "completed_at": "2026-06-14T00:00:00Z",
+      "output_files": [
+        "03-competitive-analysis.md",
+        "03-pricing-landscape.md",
+        "03-gap-analysis.md"
+      ],
+      "research_date": "2026-06-14",
+      "depth_mode": "quick"
+    },
+    "03b-research-market": { "status": "pending" }
+  },
+  "key_facts": {
+    "wedge": "[ASSUMPTION] D2C made-on-demand brand: type a piece of internet gossip/drama ('tea') -> AI generates original t-shirt designs -> human approval -> Printify fulfillment, on premium Bella+Canvas blanks.",
+    "orientation": "D2C / B2C",
+    "target_user": "Gen-Z, chronically-online (18-27), gossip/meme-fluent",
+    "target_buyer": "same as user (self-purchase) + gift buyers",
+    "problem": "Topical humor goes stale fast; people want to wear a cultural moment that is original, fast, and quality-made.",
+    "geography_focus": "Global, US-first",
+    "prioritized_competitors": [
+      { "name": "Jeff The Brotherhood (Trending Gifts)", "category": "direct", "priority_score": 82, "confidence": "medium" },
+      { "name": "RushOrderTees AI Generator", "category": "direct", "priority_score": 70, "confidence": "medium" },
+      { "name": "TeePublic", "category": "indirect", "priority_score": 68, "confidence": "high" },
+      { "name": "Redbubble", "category": "indirect", "priority_score": 64, "confidence": "high" },
+      { "name": "Kittl", "category": "enabler", "priority_score": 60, "confidence": "high" },
+      { "name": "Amazon Merch on Demand", "category": "substitute", "priority_score": 52, "confidence": "medium" },
+      { "name": "Etsy POD topical sellers", "category": "substitute", "priority_score": 48, "confidence": "medium" },
+      { "name": "Headline Shirts", "category": "indirect", "priority_score": 46, "confidence": "medium" },
+      { "name": "Prompt-to-merch AI apps (PromptInk, Spark, MerchBanao)", "category": "emerging", "priority_score": 44, "confidence": "medium" },
+      { "name": "DIY: Midjourney/Canva + Printful/Printify", "category": "substitute", "priority_score": 40, "confidence": "high" }
+    ],
+    "top_5_competitors": ["Jeff The Brotherhood (Trending Gifts)", "TeePublic", "RushOrderTees AI Generator", "Redbubble", "Kittl"],
+    "top_competitor_threat": "Jeff The Brotherhood (Trending Gifts) - the only live reactive POD brand already doing daily trend-driven drops, though it sells generic-trendy slogans rather than sharp gossip.",
+    "top_pain_patterns": [
+      "Marketplace print-quality decline / misprints",
+      "Shipping delays and 'label created' limbo; no human customer service",
+      "Generic, samey AI output with broken text rendering; nothing feels personal"
+    ],
+    "biggest_market_gap": "No brand owns 'internet gossip/tea -> wearable' as a sharp, self-serve, curated, human-checked experience for Gen-Z; reactive brands do generic slogans, marketplaces are saturated and low-trust, AI tools are generic.",
+    "pricing_landscape_summary": "Topical graphic tees list ~$22-30 (marketplaces discount to $15-18); direct reactive brand lists $29.99/sale $21.99. Our planned $29.99 sits at the top of the band, defensible only on brand + quality + timeliness.",
+    "recommended_positioning": "[inference] 'The fastest way to wear the drama - type the tea, get an original only you have, human-checked and premium-printed.' Compete on taste, timeliness, personalization, and trust, not on 'we have AI.'",
+    "recommended_channels": ["TikTok / short-form video", "X/Twitter (real-time gossip)"],
+    "competitive_confidence": "medium"
+  },
+  "generated_files": [
+    "03-competitive-analysis.md",
+    "03-pricing-landscape.md",
+    "03-gap-analysis.md"
+  ]
+}

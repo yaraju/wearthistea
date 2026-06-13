@@ -1,0 +1,182 @@
+@import "tailwindcss";
+
+/* ─────────────────────────────────────────────────────────────────────────
+   wearthistea — tabloid-newsprint × streetwear theme
+   Style: Exaggerated Minimalism + editorial display type (Libre Bodoni)
+   ───────────────────────────────────────────────────────────────────────── */
+
+@theme inline {
+  /* Brand palette */
+  --color-paper: #f6efe1; /* warm newsprint */
+  --color-paper-2: #fcf8ef; /* lifted card paper */
+  --color-ink: #15110b; /* near-black ink */
+  --color-ink-soft: #4d463a; /* muted body ink */
+  --color-pink: #ff2e6e; /* drama / primary CTA */
+  --color-pink-ink: #c4134c;
+  --color-tea: #1f7a52; /* matcha brand green */
+  --color-tea-bright: #2fc77f;
+  --color-highlight: #ffe14d; /* marker yellow */
+  --color-line: rgba(21, 17, 11, 0.24);
+
+  /* Typography */
+  --font-display: var(--font-display), Georgia, "Times New Roman", serif;
+  --font-sans: var(--font-sans), system-ui, sans-serif;
+  --font-mono: var(--font-mono), ui-monospace, monospace;
+}
+
+:root {
+  --background: var(--color-paper);
+  --foreground: var(--color-ink);
+  color-scheme: light;
+}
+
+/* High-contrast keyboard focus ring for every interactive element. */
+:where(a, button, input, textarea, select, [tabindex]):focus-visible {
+  outline: 3px solid var(--color-pink);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+/* Screen-reader-only text that becomes visible when focused. */
+.visually-hidden:where(:not(:focus-within, :active)) {
+  position: absolute !important;
+  clip-path: inset(50%) !important;
+  overflow: hidden !important;
+  width: 1px !important;
+  height: 1px !important;
+  margin: -1px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  white-space: nowrap !important;
+}
+
+/* Auto-growing "tea" field — grows with the typed drama, no JS.
+   Progressive enhancement: degrades to a fixed textarea where unsupported. */
+.tea-input {
+  field-sizing: content;
+  width: 100%;
+  resize: none;
+  min-block-size: 1.7lh;
+  max-block-size: 6lh;
+}
+
+body {
+  background-color: var(--color-paper);
+  /* faint paper grain so the cream never looks flat */
+  background-image: radial-gradient(
+      rgba(21, 17, 11, 0.025) 1px,
+      transparent 1px
+    );
+  background-size: 4px 4px;
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+/* Oversized editorial headline helper */
+.headline {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 0.92;
+  text-wrap: balance;
+}
+
+/* Marker-highlighter behind inline text */
+.marker {
+  background-image: linear-gradient(
+    transparent 55%,
+    var(--color-highlight) 55%
+  );
+  padding: 0 0.08em;
+}
+
+/* Tabloid label / kicker */
+.kicker {
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  font-size: 0.72rem;
+}
+
+/* Hard-edged "sticker" card with offset shadow */
+.sticker {
+  border: 2px solid var(--color-ink);
+  box-shadow: 6px 6px 0 0 var(--color-ink);
+}
+.sticker-pink {
+  box-shadow: 6px 6px 0 0 var(--color-pink);
+}
+.sticker-tea {
+  box-shadow: 6px 6px 0 0 var(--color-tea);
+}
+
+/* Marquee ticker */
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+.marquee-track {
+  display: inline-flex;
+  white-space: nowrap;
+  animation: marquee 28s linear infinite;
+}
+/* Let users halt the auto-running ticker by hovering/focusing it. */
+.marquee:hover .marquee-track,
+.marquee:focus-within .marquee-track {
+  animation-play-state: paused;
+}
+
+/* Skip link: hidden until focused, then pinned top-left. */
+.skip-link {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  z-index: 50;
+  padding: 0.5rem 0.9rem;
+  background: var(--color-ink);
+  color: var(--color-paper);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  border-radius: 8px;
+  transform: translateY(-150%);
+  transition: transform 0.18s ease;
+}
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+/* Slow float for hero stickers */
+@keyframes float-y {
+  0%,
+  100% {
+    transform: translateY(0) rotate(var(--rot, 0deg));
+  }
+  50% {
+    transform: translateY(-10px) rotate(var(--rot, 0deg));
+  }
+}
+.float-y {
+  animation: float-y 6s ease-in-out infinite;
+}
+
+/* Checkerboard so transparent PNGs read as transparent in the grid */
+.alpha-grid {
+  background-color: #fff;
+  background-image: linear-gradient(45deg, #e9e2d2 25%, transparent 25%),
+    linear-gradient(-45deg, #e9e2d2 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #e9e2d2 75%),
+    linear-gradient(-45deg, transparent 75%, #e9e2d2 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .marquee-track,
+  .float-y {
+    animation: none !important;
+  }
+}
