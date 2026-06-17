@@ -35,6 +35,8 @@ export interface DesignDTO {
   providerOrderId: string | null;
   trackingNumber: string | null;
   errorMessage: string | null;
+  // True when designImageData is stored in the DB — safe to retry without the file on disk.
+  hasImageData?: boolean;
 }
 
 // Checkout options the landing page uses to build the order form.

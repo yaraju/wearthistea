@@ -24,7 +24,10 @@ const list = (v: string | undefined, fallback: string[]) =>
 const jsonMap = (v: string | undefined): Record<string, number> => {
   if (!v) return {};
   try {
-    const obj = JSON.parse(v) as Record<string, unknown>;
+    // Strip over-escaped backslashes (e.g. {\"Key\":1} → {"Key":1}) that arise
+    // when someone uses \" inside single-quoted .env values unnecessarily.
+    const json = v.includes('\\"') ? v.replace(/\\"/g, '"') : v;
+    const obj = JSON.parse(json) as Record<string, unknown>;
     const out: Record<string, number> = {};
     for (const [k, val] of Object.entries(obj)) {
       const n = Number(val);
@@ -96,6 +99,8 @@ export const settings = {
   printrove: {
     /** Base product id from Printrove's catalog — the blank you print on ("default model"). */
     productId: num(process.env.PRINTROVE_PRODUCT_ID, 0),
+    /** Specific product subtype id (e.g. Round Neck T-Shirt) from Printrove's catalog. */
+    productSubtypeId: num(process.env.PRINTROVE_PRODUCT_SUBTYPE_ID, 0),
     /** Sizes offered in checkout (fallback when no variant map is set). */
     sizes: list(process.env.PRINTROVE_SIZES, ["S", "M", "L", "XL", "2XL"]),
     /** Colors offered in checkout (fallback when no variant map is set). */

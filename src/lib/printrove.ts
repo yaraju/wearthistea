@@ -92,6 +92,7 @@ async function uploadDesign(fileName: string, base64: string): Promise<number> {
   const token = await getToken();
   const bytes = Buffer.from(base64, "base64");
   const form = new FormData();
+
   form.append("file", new Blob([bytes], { type: "image/png" }), fileName);
   form.append("name", fileName.replace(/\.[a-z]+$/i, ""));
 
@@ -141,11 +142,14 @@ async function createProduct(opts: {
   designId: number;
   baseVariantId: number;
 }): Promise<{ productId: number; variantId: number | null }> {
+  const baseProductId =
+    settings.printrove.productSubtypeId || settings.printrove.productId;
+
   const data = await api("/products", {
     method: "POST",
     json: {
       name: opts.name.slice(0, 120),
-      product_id: settings.printrove.productId,
+      product_id: baseProductId,
       is_plain: false,
       design: frontDesign(opts.designId),
       variants: [{ product_id: opts.baseVariantId }],
@@ -223,6 +227,118 @@ async function createOrder(opts: {
   };
 }
 
+// ── Catalog APIs (public — no auth required) ─────────────────────────────────
+const CATALOG_BASE = "https://api.printrove.com/api";
+
+async function catalogGet<T = unknown>(path: string): Promise<T> {
+  const res = await fetch(`${CATALOG_BASE}${path}`, {
+    headers: { Accept: "application/json" },
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`Printrove catalog ${path} → ${res.status} ${res.statusText} ${detail}`);
+  }
+  return (await res.json()) as T;
+}
+
+export interface PrintroveCategory {
+  id: number;
+  name: string;
+}
+
+export interface PrintroveProduct {
+  id: number;
+  name: string;
+  category_id: number;
+  is_parent: boolean;
+  parent_id: number;
+  is_active: boolean;
+  is_instock: number;
+  product_variants?: Array<{ id: number; [k: string]: unknown }>;
+  product_attributes?: Array<{ id: number; product_id: number; name: string }>;
+  children?: Array<{
+    id: number;
+    product?: {
+      id: number;
+      name: string;
+      product_attribute_values?: Array<{
+        id: number;
+        product_attribute_id: number;
+        value: string;
+        color_code: string;
+      }>;
+    };
+  }>;
+}
+
+/** GET /api/categories — returns all top-level product categories. */
+export async function getCategories(): Promise<PrintroveCategory[]> {
+  const token = await getToken();
+  const res = await fetch(`${CATALOG_BASE}/categories`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+  });
+  if (!res.ok) throw new Error(`Printrove /categories → ${res.status} ${res.statusText}`);
+  const data = await res.json() as { data?: PrintroveCategory[] };
+  return data.data ?? [];
+}
+
+/** GET /api/category/{id}/products — returns all products in a category. */
+export async function getProductsByCategory(categoryId: number): Promise<PrintroveProduct[]> {
+  const token = await getToken();
+  const res = await fetch(`${CATALOG_BASE}/category/${categoryId}/products`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+  });
+  if (!res.ok) throw new Error(`Printrove /category/${categoryId}/products → ${res.status} ${res.statusText}`);
+  const data = await res.json() as PrintroveProduct[];
+  return Array.isArray(data) ? data : [];
+}
+
+/**
+ * GET /api/product/{id} — returns a single product with its child
+ * variants (colour × size combinations) from the catalog.
+ */
+export async function getProductWithVariants(productId: number): Promise<PrintroveProduct> {
+  const token = await getToken();
+  const res = await fetch(`${CATALOG_BASE}/product/${productId}`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+  });
+  if (!res.ok) throw new Error(`Printrove /product/${productId} → ${res.status} ${res.statusText}`);
+  const data = await res.json() as { data: PrintroveProduct };
+  return data.data;
+}
+
+/** Resolve a customer's color/size choice to a Printrove base variant id using the API. */
+async function resolveVariantIdDynamically(productId: number, color: string, size: string): Promise<number> {
+  const product = await getProductWithVariants(productId);
+  if (!product.children || product.children.length === 0) {
+    throw new Error(`Printrove product ${productId} has no variants (children).`);
+  }
+
+  for (const child of product.children) {
+    const attrs = child.product?.product_attribute_values;
+    if (!attrs) continue;
+
+    let matchColor = false;
+    let matchSize = false;
+
+    for (const attr of attrs) {
+      // Attribute 1 = Size, 2 = Color (common for Printrove T-shirts)
+      if (attr.product_attribute_id === 1 && attr.value.toLowerCase() === size.toLowerCase()) {
+        matchSize = true;
+      }
+      if (attr.product_attribute_id === 2 && attr.value.toLowerCase() === color.toLowerCase()) {
+        matchColor = true;
+      }
+    }
+
+    if (matchColor && matchSize) {
+      return child.id;
+    }
+  }
+
+  throw new Error(`No Printrove variant found for "${color}|${size}" in product ${productId}.`);
+}
+
 // ── Provider interface ───────────────────────────────────────────────────────
 function options(): VariantOptions {
   const keys = Object.keys(settings.printrove.variantMap);
@@ -250,30 +366,43 @@ function options(): VariantOptions {
   };
 }
 
-async function fulfill(input: FulfillInput): Promise<FulfillResult> {
-  if (!settings.printrove.productId)
-    throw new Error(
-      "PRINTROVE_PRODUCT_ID is not set — provide the base product (the blank you print on)."
-    );
-  if (!input.customer)
-    throw new Error("Printrove orders require recipient & shipping details.");
+export async function fulfill(input: FulfillInput): Promise<FulfillResult> {
+  const baseProductId =
+    settings.printrove.productSubtypeId || settings.printrove.productId;
 
-  const baseVariantId = resolveVariantId(input.variant.color, input.variant.size);
+  if (!baseProductId)
+    throw new Error(
+      "PRINTROVE_PRODUCT_SUBTYPE_ID or PRINTROVE_PRODUCT_ID is not set — provide the base product (the blank you print on)."
+    );
+
+  const baseVariantId = await resolveVariantIdDynamically(
+    baseProductId,
+    input.variant.color,
+    input.variant.size
+  );
   const designId = await uploadDesign(input.designFileName, input.designBase64);
   const { productId, variantId } = await createProduct({
     name: input.title,
     designId,
     baseVariantId,
   });
-  const { orderId, trackingNumber } = await createOrder({
-    reference: input.referenceNumber,
-    productId,
-    variantId,
-    designId,
-    quantity: input.quantity,
-    cod: input.cod,
-    customer: input.customer,
-  });
+
+  let orderId: string | null = null;
+  let trackingNumber: string | null = null;
+
+  if (input.customer) {
+    const res = await createOrder({
+      reference: input.referenceNumber,
+      productId,
+      variantId,
+      designId,
+      quantity: input.quantity,
+      cod: input.cod,
+      customer: input.customer,
+    });
+    orderId = res.orderId;
+    trackingNumber = res.trackingNumber;
+  }
 
   return { productId: String(productId), orderId, url: null, trackingNumber };
 }

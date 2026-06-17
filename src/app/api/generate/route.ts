@@ -39,12 +39,13 @@ export async function POST(req: Request) {
       const base = `${i + 1}-${Date.now()}`;
       let designImagePath = "";
       let productImagePath = "";
+      let designB64 = "";
       let status = "generated";
       let errorMessage: string | null = null;
 
       try {
         // One paid AI call: the clean, print-ready design.
-        const designB64 = await generateImage(prompts.designImage(c));
+        designB64 = await generateImage(prompts.designImage(c));
         designImagePath = await saveImage(batch.id, `${base}-design.png`, designB64);
 
         // Free: composite that same file onto a tee mockup for the preview.
@@ -80,6 +81,8 @@ export async function POST(req: Request) {
           productPrompt: `[mockup composite of clean design on ${settings.printify.defaultColor} tee]`,
           designImagePath,
           productImagePath,
+          // Store base64 so approval can proceed even after a redeploy wipes the disk.
+          designImageData: designImagePath ? designB64 : null,
           status,
           errorMessage,
         },

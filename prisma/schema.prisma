@@ -39,6 +39,9 @@ model Design {
   // Stored artwork (paths under /public, served at the same URL)
   productImagePath String // styled product mockup shown in the grid
   designImagePath  String // clean, print-ready art sent to Printify
+  // Base64 copy of the print-ready design — used as fallback when the file is
+  // missing (e.g. after a Railway redeploy wipes the ephemeral filesystem).
+  designImageData  String? @db.Text
 
   // Lifecycle: generated -> pending (queued for approval) -> approved -> published | rejected | failed
   status        String  @default("generated")

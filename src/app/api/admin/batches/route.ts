@@ -25,7 +25,10 @@ export async function GET(req: Request) {
     });
 
     return NextResponse.json({
-      designs,
+      designs: designs.map(({ designImageData, ...d }) => ({
+        ...d,
+        hasImageData: Boolean(designImageData),
+      })),
       counts: Object.fromEntries(counts.map((c) => [c.status, c._count._all])),
     });
   } catch (err) {

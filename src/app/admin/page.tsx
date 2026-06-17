@@ -136,14 +136,15 @@ export default function AdminPage() {
 }
 
 function QueueCard({ row, onChange }: { row: Row; onChange: () => void }) {
-  const [busy, setBusy] = useState<null | "approve" | "reject">(null);
+  const [busy, setBusy] = useState<null | "approve" | "reject" | "retry">(null);
   const [err, setErr] = useState<string | null>(null);
 
-  async function act(kind: "approve" | "reject") {
+  async function act(kind: "approve" | "reject" | "retry") {
     setBusy(kind);
     setErr(null);
     try {
-      const res = await fetch(`/api/admin/${kind}`, {
+      const endpoint = kind === "retry" ? "approve" : kind;
+      const res = await fetch(`/api/admin/${endpoint}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ designId: row.id }),
@@ -160,6 +161,8 @@ function QueueCard({ row, onChange }: { row: Row; onChange: () => void }) {
 
   const img = row.productImagePath || row.designImagePath;
   const isPending = row.status === "pending";
+  const isFailed = row.status === "failed";
+  const hasArtwork = Boolean(row.hasImageData);
 
   return (
     <div className="sticker flex flex-col overflow-hidden rounded-2xl bg-paper-2">
@@ -281,6 +284,23 @@ function QueueCard({ row, onChange }: { row: Row; onChange: () => void }) {
             </button>
           </div>
         )}
+
+        {isFailed && hasArtwork && (
+          <button
+            onClick={() => act("retry")}
+            disabled={busy !== null}
+            className="inline-flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-ink bg-paper px-3 py-2.5 font-mono text-xs font-bold uppercase tracking-wider text-ink transition-transform duration-200 hover:-translate-y-0.5 disabled:opacity-50"
+          >
+            {busy === "retry" ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+            ) : (
+              <>
+                <RefreshCw className="h-4 w-4" aria-hidden /> Retry &amp; print
+              </>
+            )}
+          </button>
+        )}
+
         {err && <p className="mt-2 text-xs text-pink-ink">{err}</p>}
       </div>
     </div>

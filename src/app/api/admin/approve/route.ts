@@ -54,7 +54,19 @@ export async function POST(req: Request) {
       : settings.printrove.retailPrice;
 
   try {
-    const designBase64 = await readImageAsBase64(printPath);
+    let designBase64: string;
+    try {
+      designBase64 = await readImageAsBase64(printPath);
+    } catch {
+      // File missing (e.g. ephemeral Railway filesystem after a redeploy).
+      // Fall back to the base64 copy stored in the database.
+      if (!design.designImageData) {
+        throw new Error(
+          "Artwork file is missing and no database copy exists. Re-generate this design."
+        );
+      }
+      designBase64 = design.designImageData;
+    }
     const description =
       design.blurb ??
       `${design.phrase} — an original wearthistea drop. ${design.visualConcept}`;
