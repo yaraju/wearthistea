@@ -1,0 +1,1 @@
+See [AGENTS.md](../AGENTS.md) for project-specific rules and POD integration guidelines.
