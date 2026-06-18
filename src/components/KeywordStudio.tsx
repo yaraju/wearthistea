@@ -1,19 +1,12 @@
 "use client";
 
-import { useState, type ChangeEvent, type FormEvent } from "react";
+import { useState, useEffect, type ChangeEvent, type FormEvent } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { Sparkles, Loader2, Check, AlertTriangle, ArrowRight } from "lucide-react";
 import type { DesignDTO, GenerateResponse, VariantOptionsDTO } from "@/lib/types";
 
 const SKELETON_COUNT = 5; // matches default settings.optionsPerKeyword
 
-const EXAMPLES = [
-  "the group chat finally imploded",
-  "celebrity feud of the week",
-  "my situationship has a podcast now",
-  "office drama: someone replied-all",
-  "mercury is in microwave",
-];
 
 type Phase = "idle" | "loading" | "done" | "error";
 
@@ -33,7 +26,45 @@ export default function KeywordStudio() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<GenerateResponse | null>(null);
+  const [catalog, setCatalog] = useState<{ categories: any[] }>({ categories: [] });
+  const [selectedProduct, setSelectedProduct] = useState<any>(null);
+  const [selectedColor, setSelectedColor] = useState("Black");
+  const [examples, setExamples] = useState<string[]>([]);
   const reduce = useReducedMotion();
+
+  useEffect(() => {
+    fetch("/api/catalog")
+      .then(res => res.json())
+      .then(data => {
+        setCatalog(data);
+        // Default: Mens' Clothing -> Half Sleeve Round Neck T-shirt -> Black
+        const mensClothing = data.categories?.find((c: any) => c.name.toLowerCase().includes("men"));
+        const defaultProduct = mensClothing?.products?.find((p: any) => p.name.toLowerCase().includes("half sleeve round neck"));
+        
+        if (defaultProduct) {
+          setSelectedProduct(defaultProduct);
+          if (defaultProduct.colors.includes("Black")) {
+            setSelectedColor("Black");
+          } else if (defaultProduct.colors.length > 0) {
+            setSelectedColor(defaultProduct.colors[0]);
+          }
+        } else if (data.categories?.length > 0 && data.categories[0].products?.length > 0) {
+          const firstProd = data.categories[0].products[0];
+          setSelectedProduct(firstProd);
+          setSelectedColor(firstProd.colors[0] || "Black");
+        }
+      })
+      .catch(err => console.error("Failed to fetch catalog", err));
+
+    fetch("/api/gossip-examples")
+      .then(res => res.json())
+      .then(data => {
+        if (data.examples && data.examples.length > 0) {
+          setExamples(data.examples);
+        }
+      })
+      .catch(err => console.error("Failed to fetch gossip examples", err));
+  }, []);
 
   async function spill(seed?: string) {
     const tea = (seed ?? keyword).trim();
@@ -43,11 +74,18 @@ export default function KeywordStudio() {
     setError(null);
     setResult(null);
 
+    const selectedCategory = catalog.categories.find(c => c.products.some((p: any) => p.id === selectedProduct?.id));
+
     try {
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ keyword: tea }),
+        body: JSON.stringify({ 
+          keyword: tea,
+          category: selectedCategory?.name,
+          productType: selectedProduct?.name,
+          color: selectedColor
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Something went wrong.");
@@ -63,45 +101,99 @@ export default function KeywordStudio() {
     <div id="studio" className="w-full">
       {/* Input card */}
       <div className="sticker sticker-pink rounded-2xl bg-paper-2 p-2 sm:p-3">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-          <label htmlFor="tea" className="sr-only">
-            Spill the tea — describe a piece of drama
-          </label>
-          <textarea
-            id="tea"
-            rows={1}
-            value={keyword}
-            onChange={(e) => setKeyword(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                spill();
-              }
-            }}
-            placeholder="Spill the tea…  (a feud, a moment, a vibe)"
-            maxLength={280}
-            autoComplete="off"
-            enterKeyHint="go"
-            aria-describedby="tea-hint"
-            className="tea-input bg-transparent px-4 py-4 font-mono text-base text-ink placeholder:text-ink-soft/70 focus:outline-none sm:text-lg"
-          />
-          <button
-            onClick={() => spill()}
-            disabled={phase === "loading" || keyword.trim().length < 2}
-            className="group inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 rounded-xl bg-pink px-6 py-4 font-mono text-sm font-bold uppercase tracking-wider text-paper transition-colors duration-200 hover:bg-pink-ink disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {phase === "loading" ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                Brewing…
-              </>
-            ) : (
-              <>
-                <Sparkles className="h-4 w-4" aria-hidden />
-                Brew designs
-              </>
-            )}
-          </button>
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <div className="flex flex-1 flex-col gap-2">
+              <label htmlFor="product-select" className="px-4 font-mono text-xs font-bold uppercase tracking-wider text-ink-soft">
+                Product & Style
+              </label>
+              <select
+                id="product-select"
+                className="mx-2 rounded-xl bg-paper-1 px-4 py-3 font-mono text-sm text-ink focus:outline-none"
+                value={selectedProduct?.id || ""}
+                onChange={(e) => {
+                  const prodId = parseInt(e.target.value);
+                  const prod = catalog.categories.flatMap(c => c.products).find(p => p.id === prodId);
+                  setSelectedProduct(prod);
+                  if (prod && !prod.colors.includes(selectedColor)) {
+                    setSelectedColor(prod.colors[0] || "Black");
+                  }
+                }}
+              >
+                {catalog.categories.map((cat) => (
+                  <optgroup key={cat.id} label={cat.name}>
+                    {cat.products.map((prod: any) => (
+                      <option key={prod.id} value={prod.id}>
+                        {prod.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <label className="px-4 font-mono text-xs font-bold uppercase tracking-wider text-ink-soft">
+                Color
+              </label>
+              <div className="mx-2 flex flex-wrap gap-2 px-2 py-1">
+                {selectedProduct?.colors.map((color: string) => (
+                  <button
+                    key={color}
+                    onClick={() => setSelectedColor(color)}
+                    title={color}
+                    className={`h-8 w-8 rounded-full border-2 transition-all ${
+                      selectedColor === color ? "border-pink scale-110 shadow-md" : "border-transparent opacity-70 hover:opacity-100"
+                    }`}
+                    style={{ 
+                      backgroundColor: color.toLowerCase() === "white" ? "#FFFFFF" : color.toLowerCase() === "black" ? "#000000" : color.toLowerCase() 
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end border-t border-ink/5 pt-3">
+            <label htmlFor="tea" className="sr-only">
+              Spill the tea — describe a piece of drama
+            </label>
+            <textarea
+              id="tea"
+              rows={1}
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  spill();
+                }
+              }}
+              placeholder="Spill the tea…  (a feud, a moment, a vibe)"
+              maxLength={280}
+              autoComplete="off"
+              enterKeyHint="go"
+              aria-describedby="tea-hint"
+              className="tea-input bg-transparent px-4 py-4 font-mono text-base text-ink placeholder:text-ink-soft/70 focus:outline-none sm:text-lg"
+            />
+            <button
+              onClick={() => spill()}
+              disabled={phase === "loading" || keyword.trim().length < 2}
+              className="group inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 rounded-xl bg-pink px-6 py-4 font-mono text-sm font-bold uppercase tracking-wider text-paper transition-colors duration-200 hover:bg-pink-ink disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {phase === "loading" ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                  Brewing…
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-4 w-4" aria-hidden />
+                  Brew designs
+                </>
+              )}
+            </button>
+          </div>
         </div>
       </div>
       <span id="tea-hint" className="visually-hidden">
@@ -110,19 +202,21 @@ export default function KeywordStudio() {
       </span>
 
       {/* Example chips */}
-      <div className="mt-4 flex flex-wrap items-center gap-2">
-        <span className="kicker text-ink-soft">try:</span>
-        {EXAMPLES.map((ex) => (
-          <button
-            key={ex}
-            onClick={() => spill(ex)}
-            disabled={phase === "loading"}
-            className="cursor-pointer rounded-full border border-line bg-paper-2 px-3 py-1.5 text-sm text-ink-soft transition-colors duration-200 hover:border-ink hover:text-ink disabled:opacity-50"
-          >
-            {ex}
-          </button>
-        ))}
-      </div>
+      {examples.length > 0 && (
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <span className="kicker text-ink-soft">try:</span>
+          {examples.map((ex) => (
+            <button
+              key={ex}
+              onClick={() => spill(ex)}
+              disabled={phase === "loading"}
+              className="cursor-pointer rounded-full border border-line bg-paper-2 px-3 py-1.5 text-sm text-ink-soft transition-colors duration-200 hover:border-ink hover:text-ink disabled:opacity-50"
+            >
+              {ex}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Polite announcement for assistive tech when results are ready. */}
       <div aria-live="polite" className="visually-hidden">

@@ -21,6 +21,9 @@ export interface Concept {
   visualConcept: string; // drawable scene/character/graphic direction
   vibe?: string; // 2–3 mood words
   blurb?: string; // one-line marketing hook
+  category?: string;
+  productType?: string;
+  color?: string;
 }
 
 const clean = (value: string) =>
@@ -187,7 +190,14 @@ Quality bar:
   /** ── 2. CLEAN PRINT-READY ARTWORK — image model ─────────────────────────── */
   designImage: (c: Concept) =>
     `
-Create a high-resolution, print-ready t-shirt GRAPHIC ONLY.
+Create a high-resolution, print-ready ${c.productType || "T-shirt"} GRAPHIC ONLY.
+
+This graphic will be printed on a ${c.color || "Black"} ${c.productType || "T-shirt"} (${c.category || "Clothing"}).
+
+${(c.color || "Black").toLowerCase() === "black" || (c.color || "Black").toLowerCase() === "navy" || (c.color || "Black").toLowerCase() === "charcoal" 
+  ? "IMPORTANT: The t-shirt color is DARK. Use bright, high-contrast colors (white, neons, pastels) so the design is visible." 
+  : "IMPORTANT: The t-shirt color is LIGHT. Use dark, high-contrast colors (black, deep blues, rich reds) so the design is visible."
+}
 
 This is the final transparent artwork to upload to Printify.
 Do NOT show a t-shirt, model, hanger, wall, studio, paper, sticker, mockup,
@@ -229,6 +239,13 @@ ${ART_RULES}
   designImageArtOnly: (c: Concept) =>
     `
 Create a high-resolution, print-ready t-shirt ILLUSTRATION ONLY.
+
+This illustration will be printed on a ${c.color || "Black"} ${c.productType || "T-shirt"}.
+
+${(c.color || "Black").toLowerCase() === "black" || (c.color || "Black").toLowerCase() === "navy" || (c.color || "Black").toLowerCase() === "charcoal" 
+  ? "IMPORTANT: The t-shirt color is DARK. Use bright, high-contrast colors (white, neons, pastels) so the illustration is visible." 
+  : "IMPORTANT: The t-shirt color is LIGHT. Use dark, high-contrast colors (black, deep blues, rich reds) so the illustration is visible."
+}
 
 Do NOT render any text, letters, numbers, captions, labels, watermarks, logos,
 signatures, or readable marks anywhere in the image.
@@ -321,5 +338,23 @@ Mark needsRegeneration true if any of these fail:
 - product shot changes the approved artwork instead of preserving it
 
 If regeneration is needed, write a concise corrected prompt in regenerationPrompt.
+`.trim(),
+
+  gossipExamples: `
+Generate 5 short, punchy phrases that match the theme of "online gossip", "internet drama", or "spilling tea".
+These phrases will be used as placeholder examples in a search bar for a custom t-shirt studio.
+The tone should be witty, slightly chaotic, relatable to Gen-Z/Millennials, and chronically online.
+Each phrase should be under 40 characters.
+
+Return JSON only:
+{
+  "examples": [
+    "example phrase 1",
+    "example phrase 2",
+    "example phrase 3",
+    "example phrase 4",
+    "example phrase 5"
+  ]
+}
 `.trim(),
 };

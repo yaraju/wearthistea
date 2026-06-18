@@ -21,3 +21,8 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - Use `npx tsx` to run TypeScript scripts in `scripts/`.
 - Use `scripts/test-fulfillment.ts` to verify design upload and product creation without placing real orders (by omitting `--order`).
 - Always verify design upload and product creation before testing order placement.
+
+## Design Pipeline
+- When generating designs, always consider the garment color to ensure high contrast.
+- Designs are generated via Gemini API and mockups are created by compositing the design onto a blank tee.
+- Support for dynamic catalog selection (category, product type, color) is provided on the landing page.

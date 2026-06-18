@@ -254,6 +254,7 @@ export interface PrintroveProduct {
   parent_id: number;
   is_active: boolean;
   is_instock: number;
+  image_url?: string;
   product_variants?: Array<{ id: number; [k: string]: unknown }>;
   product_attributes?: Array<{ id: number; product_id: number; name: string }>;
   children?: Array<{
@@ -271,15 +272,84 @@ export interface PrintroveProduct {
   }>;
 }
 
-/** GET /api/categories — returns all top-level product categories. */
-export async function getCategories(): Promise<PrintroveCategory[]> {
+export interface PrintroveStockItem {
+  id: number;
+  product_id: number;
+  variant_id: number;
+  quantity: number;
+  availability: string;
+  category_id: number;
+  color: string;
+  size: string;
+}
+
+/** GET /api/parent_products — returns all parent products. */
+export async function getParentProducts(): Promise<PrintroveProduct[]> {
   const token = await getToken();
-  const res = await fetch(`${CATALOG_BASE}/categories`, {
+  const res = await fetch(`${CATALOG_BASE}/parent_products`, {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
   });
-  if (!res.ok) throw new Error(`Printrove /categories → ${res.status} ${res.statusText}`);
-  const data = await res.json() as { data?: PrintroveCategory[] };
+  if (!res.ok) throw new Error(`Printrove /parent_products → ${res.status} ${res.statusText}`);
+  const data = await res.json() as { data?: PrintroveProduct[] };
   return data.data ?? [];
+}
+
+/** GET /api/stock — returns stock availability. */
+export async function getStockCount(params: {
+  page?: number;
+  per_page?: number;
+  availability?: string;
+  category_id?: number;
+} = {}): Promise<PrintroveStockItem[]> {
+  const token = await getToken();
+  const query = new URLSearchParams();
+  if (params.page) query.append("page", params.page.toString());
+  if (params.per_page) query.append("per_page", params.per_page.toString());
+  if (params.availability) query.append("availability", params.availability);
+  if (params.category_id) query.append("category_id", params.category_id.toString());
+
+  const res = await fetch(`${CATALOG_BASE}/stock?${query.toString()}`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+  });
+  if (!res.ok) throw new Error(`Printrove /stock → ${res.status} ${res.statusText}`);
+  const data = await res.json() as { data?: any[] };
+  
+  const results = data.data ?? [];
+  return results.map((item: any) => {
+    // Extract color from product_variants if it's not directly on the item
+    let color = item.color;
+    if (!color && item.product_variants) {
+        const colorAttr = item.product_variants.find((v: any) => v.product_attribute_id === 2 || v.name?.toLowerCase().includes("color"));
+        color = colorAttr?.value;
+    }
+
+    return {
+      id: item.id,
+      product_id: item.parent_id || item.product_id, // stock items often refer to parent_id as the base product
+      variant_id: item.id,
+      quantity: item.stock ?? item.quantity,
+      availability: item.is_instock ? "in_stock" : "out_of_stock",
+      category_id: item.category_id,
+      color: color || "Unknown",
+      size: item.size || item.product_variants?.find((v: any) => v.product_attribute_id === 1)?.value || "Unknown",
+    };
+  });
+}
+
+/** GET /api/categories — returns all top-level product categories. */
+export async function getCategories(): Promise<PrintroveCategory[]> {
+  try {
+    const token = await getToken();
+    const res = await fetch(`${CATALOG_BASE}/categories`, {
+      headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+    });
+    if (!res.ok) throw new Error(`Printrove /categories → ${res.status} ${res.statusText}`);
+    const data = await res.json() as { data?: PrintroveCategory[] };
+    return data.data ?? [];
+  } catch (err) {
+    console.error("Error in getCategories:", err);
+    throw err;
+  }
 }
 
 /** GET /api/category/{id}/products — returns all products in a category. */

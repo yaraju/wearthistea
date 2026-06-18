@@ -113,6 +113,40 @@ export async function generateConcepts(
 }
 
 /**
+ * Fetch dynamic gossip examples from Gemini.
+ */
+export async function generateGossipExamples(): Promise<string[]> {
+  if (!hasApiKey()) {
+    return [
+      "the group chat finally imploded",
+      "celebrity feud of the week",
+      "my situationship has a podcast now",
+      "office drama: someone replied-all",
+      "mercury is in microwave",
+    ];
+  }
+
+  const res = await ai().models.generateContent({
+    model: settings.gemini.textModel,
+    contents: [{ role: "user", parts: [{ text: prompts.gossipExamples }] }],
+    config: {
+      temperature: 0.8,
+      responseMimeType: "application/json",
+    },
+  });
+
+  const text = res.text;
+  if (!text) throw new Error("Gossip model returned no text.");
+
+  try {
+    const parsed = JSON.parse(text);
+    return parsed.examples || [];
+  } catch {
+    throw new Error("Gossip model returned invalid JSON.");
+  }
+}
+
+/**
  * Generate a single image from a prompt. Returns base64-encoded PNG bytes.
  * Auto-routes: "imagen*" models use the Images API; everything else uses the
  * Gemini native image output (Nano Banana family).

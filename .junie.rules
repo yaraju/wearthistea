@@ -1,0 +1,10 @@
+# Junie Rules
+
+This project uses Junie as an autonomous developer. Junie must follow the guidelines defined in [AGENTS.md](./AGENTS.md).
+
+## Key Principles
+- Follow the Next.js version-specific rules in AGENTS.md.
+- Adhere to the Print-on-Demand (POD) integration patterns for Printify and PrintRove.
+- Use dynamic variant lookup for PrintRove.
+- Verify design uploads and product creation before testing order placement.
+- Maintain consistency with existing coding patterns.

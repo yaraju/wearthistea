@@ -13,12 +13,15 @@ export const maxDuration = 300;
 
 const Body = z.object({
   keyword: z.string().trim().min(2).max(280),
+  category: z.string().optional(),
+  productType: z.string().optional(),
+  color: z.string().optional(),
 });
 
 export async function POST(req: Request) {
-  let keyword: string;
+  let body;
   try {
-    keyword = Body.parse(await req.json()).keyword;
+    body = Body.parse(await req.json());
   } catch {
     return NextResponse.json(
       { error: "Spill something first — give us 2–280 characters of tea." },
@@ -26,16 +29,22 @@ export async function POST(req: Request) {
     );
   }
 
+  const { keyword, category, productType, color } = body;
+
   try {
     const count = settings.optionsPerKeyword;
     const concepts = await generateConcepts(keyword, count);
 
     const batch = await prisma.batch.create({ data: { keyword } });
 
-    // For each concept: render the clean print file + the product shot.
-    const designs = [];
-    for (let i = 0; i < concepts.length; i++) {
-      const c = concepts[i];
+    // For each concept: render the clean print file + the product shot in parallel.
+    const designPromises = concepts.map(async (concept, i) => {
+      const c = {
+        ...concept,
+        category,
+        productType,
+        color: color || settings.printify.defaultColor,
+      };
       const base = `${i + 1}-${Date.now()}`;
       let designImagePath = "";
       let productImagePath = "";
@@ -53,7 +62,7 @@ export async function POST(req: Request) {
           try {
             const productB64 = await compositeOnTee(
               designB64,
-              settings.printify.defaultColor
+              c.color || settings.printify.defaultColor
             );
             productImagePath = await saveImage(
               batch.id,
@@ -69,7 +78,7 @@ export async function POST(req: Request) {
         errorMessage = err instanceof Error ? err.message : String(err);
       }
 
-      const design = await prisma.design.create({
+      return await prisma.design.create({
         data: {
           batchId: batch.id,
           title: c.title,
@@ -78,7 +87,9 @@ export async function POST(req: Request) {
           vibe: c.vibe ?? null,
           blurb: c.blurb ?? null,
           designPrompt: prompts.designImage(c),
-          productPrompt: `[mockup composite of clean design on ${settings.printify.defaultColor} tee]`,
+          productPrompt: `[mockup composite of clean design on ${
+            c.color || settings.printify.defaultColor
+          } tee]`,
           designImagePath,
           productImagePath,
           // Store base64 so approval can proceed even after a redeploy wipes the disk.
@@ -87,8 +98,9 @@ export async function POST(req: Request) {
           errorMessage,
         },
       });
-      designs.push(design);
-    }
+    });
+
+    const designs = await Promise.all(designPromises);
 
     return NextResponse.json({
       batchId: batch.id,
