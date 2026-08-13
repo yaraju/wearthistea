@@ -141,48 +141,20 @@ Generated artwork is written to `public/generated/<batchId>/` (git-ignored).
 
 ---
 
-## Deploy to Railway
+## Deploy to Google Cloud (Cloud Run + Firebase Hosting)
 
-The app runs as a long-lived Node server (`next start`) — Railway-ready out of
-the box via `railway.json` (Railpack build, `prisma db push` before each deploy,
-health check at `/api/health`).
+The app is configured for serverless deployment on Google Cloud. It uses Cloud Run for compute, Google Cloud Storage for persistent artwork, and Firebase Hosting as a global CDN.
 
-1. **Create the service** — New Project → *Deploy from GitHub repo* (or
-   `railway up` from the CLI). Railpack auto-detects Next.js and runs
-   `npm run build`.
+1. **Setup GCP Infrastructure.** Follow the instructions in [GCP_SETUP.md](./GCP_SETUP.md) to create the bucket, Artifact Registry, and Service Account.
 
-2. **Add a Volume for artwork.** The container filesystem is *ephemeral* — files
-   written to `public/generated/` vanish on every redeploy, which would break the
-   admin queue and Printify uploads. So:
-   - Service → **Volumes** → New Volume, mount path `/data`.
-   - Set `STORAGE_DIR=/data`. Generated images now persist there and are served
-     by the `/generated/[...path]` route handler.
+2. **Configure GitHub Secrets.** Add the required secrets (GCP_SA_KEY, DATABASE_URL, etc.) to your GitHub repository.
 
-3. **Set environment variables** (Service → Variables):
+3. **Deploy.** Push to the `main` branch to trigger the GitHub Action defined in `.github/workflows/deploy.yml`.
 
-   | Var | Value |
-   |---|---|
-   | `DATABASE_URL` | your Neon **pooled** connection string |
-   | `GEMINI_API_KEY` | AI Studio key |
-   | `PRINTIFY_API_TOKEN` / `PRINTIFY_SHOP_ID` | from Printify |
-   | `STORAGE_DIR` | `/data` (the Volume mount above) |
-   | `BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD` | a username + password to gate the site |
-
-   `PORT` is injected by Railway automatically — don't set it.
-
-4. **Deploy.** The `preDeployCommand` runs `prisma db push` to sync the schema to
-   Neon, then the server boots. Railway gives you a public URL — open it and
-   you'll get a password prompt (the Basic Auth gate).
-
-**Access gate:** with `BASIC_AUTH_*` set, the *entire* deployment sits behind one
-password (it's a private Phase-1 tool). This is deliberate — gating only the API
-routes would break the landing page's generate button, because browsers don't
-show the auth prompt for background `fetch()` calls. Leave the two vars empty to
-disable the gate.
-
-**Keeping Neon:** no database migration needed — Railway just points
-`DATABASE_URL` at your existing Neon database. (You can swap to Railway Postgres
-later by changing that one variable.)
+### Architecture
+- **Next.js Standalone**: The build process creates a minimal production server.
+- **GCS Storage**: Images are stored in Google Cloud Storage when `GCS_BUCKET` is set, ensuring persistence across serverless restarts.
+- **Firebase Hosting**: Handles the global CDN and SSL, rewriting all requests to the Cloud Run service.
 
 ## Notes & guardrails
 
