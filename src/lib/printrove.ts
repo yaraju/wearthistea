@@ -115,16 +115,6 @@ async function uploadDesign(fileName: string, base64: string): Promise<number> {
   return id;
 }
 
-/** Resolve a customer's color/size choice to a Printrove base variant id. */
-function resolveVariantId(color: string, size: string): number {
-  const key = `${color}|${size}`;
-  const id = settings.printrove.variantMap[key];
-  if (!id)
-    throw new Error(
-      `No Printrove variant mapped for "${key}". Set PRINTROVE_VARIANT_MAP, e.g. {"${key}": 12345}.`
-    );
-  return id;
-}
 
 function frontDesign(designId: number) {
   const p = settings.printrove.print;
@@ -230,16 +220,6 @@ async function createOrder(opts: {
 // ── Catalog APIs (public — no auth required) ─────────────────────────────────
 const CATALOG_BASE = "https://api.printrove.com/api";
 
-async function catalogGet<T = unknown>(path: string): Promise<T> {
-  const res = await fetch(`${CATALOG_BASE}${path}`, {
-    headers: { Accept: "application/json" },
-  });
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`Printrove catalog ${path} → ${res.status} ${res.statusText} ${detail}`);
-  }
-  return (await res.json()) as T;
-}
 
 export interface PrintroveCategory {
   id: number;
@@ -283,6 +263,23 @@ export interface PrintroveStockItem {
   size: string;
 }
 
+interface PrintroveRawStockItem {
+  id: number;
+  product_id: number;
+  parent_id?: number;
+  stock?: number;
+  quantity?: number;
+  is_instock?: number;
+  category_id: number;
+  color?: string;
+  size?: string;
+  product_variants?: Array<{
+    product_attribute_id: number;
+    value: string;
+    name?: string;
+  }>;
+}
+
 /** GET /api/parent_products — returns all parent products. */
 export async function getParentProducts(): Promise<PrintroveProduct[]> {
   const token = await getToken();
@@ -312,14 +309,14 @@ export async function getStockCount(params: {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
   });
   if (!res.ok) throw new Error(`Printrove /stock → ${res.status} ${res.statusText}`);
-  const data = await res.json() as { data?: any[] };
+  const data = await res.json() as { data?: PrintroveRawStockItem[] };
   
   const results = data.data ?? [];
-  return results.map((item: any) => {
+  return results.map((item) => {
     // Extract color from product_variants if it's not directly on the item
     let color = item.color;
     if (!color && item.product_variants) {
-        const colorAttr = item.product_variants.find((v: any) => v.product_attribute_id === 2 || v.name?.toLowerCase().includes("color"));
+        const colorAttr = item.product_variants.find((v: { product_attribute_id: number; value: string; name?: string }) => v.product_attribute_id === 2 || v.name?.toLowerCase().includes("color"));
         color = colorAttr?.value;
     }
 
@@ -331,7 +328,7 @@ export async function getStockCount(params: {
       availability: item.is_instock ? "in_stock" : "out_of_stock",
       category_id: item.category_id,
       color: color || "Unknown",
-      size: item.size || item.product_variants?.find((v: any) => v.product_attribute_id === 1)?.value || "Unknown",
+      size: item.size || item.product_variants?.find((v: { product_attribute_id: number; value: string }) => v.product_attribute_id === 1)?.value || "Unknown",
     };
   });
 }

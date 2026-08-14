@@ -3,7 +3,7 @@
 import { useState, useEffect, type ChangeEvent, type FormEvent } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { Sparkles, Loader2, Check, AlertTriangle, ArrowRight, RotateCcw } from "lucide-react";
-import type { DesignDTO, GenerateResponse, VariantOptionsDTO } from "@/lib/types";
+import type { DesignDTO, GenerateResponse, VariantOptionsDTO, CatalogResponse, CatalogProduct, CatalogCategory } from "@/lib/types";
 
 const SKELETON_COUNT = 5; // matches default settings.optionsPerKeyword
 
@@ -26,8 +26,8 @@ export default function KeywordStudio() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<GenerateResponse | null>(null);
-  const [catalog, setCatalog] = useState<{ categories: any[] }>({ categories: [] });
-  const [selectedProduct, setSelectedProduct] = useState<any>(null);
+  const [catalog, setCatalog] = useState<CatalogResponse>({ categories: [] });
+  const [selectedProduct, setSelectedProduct] = useState<CatalogProduct | null>(null);
   const [selectedColor, setSelectedColor] = useState("Black");
   const [style, setStyle] = useState<"raster" | "svg">("raster");
   const [examples, setExamples] = useState<string[]>([]);
@@ -39,8 +39,8 @@ export default function KeywordStudio() {
       .then(data => {
         setCatalog(data);
         // Default: Mens' Clothing -> Half Sleeve Round Neck T-shirt -> Black
-        const mensClothing = data.categories?.find((c: any) => c.name.toLowerCase().includes("men"));
-        const defaultProduct = mensClothing?.products?.find((p: any) => p.name.toLowerCase().includes("half sleeve round neck"));
+        const mensClothing = data.categories?.find((c: CatalogCategory) => c.name.toLowerCase().includes("men"));
+        const defaultProduct = mensClothing?.products?.find((p: CatalogProduct) => p.name.toLowerCase().includes("half sleeve round neck"));
         
         if (defaultProduct) {
           setSelectedProduct(defaultProduct);
@@ -75,7 +75,7 @@ export default function KeywordStudio() {
     setError(null);
     setResult(null);
 
-    const selectedCategory = catalog.categories.find(c => c.products.some((p: any) => p.id === selectedProduct?.id));
+    const selectedCategory = catalog.categories.find(c => c.products.some(p => p.id === selectedProduct?.id));
 
     try {
       const res = await fetch("/api/generate", {
@@ -105,11 +105,11 @@ export default function KeywordStudio() {
     setResult(prev => {
       if (!prev) return null;
       return {
-        ...prev,
-        designs: prev.designs.map(d => 
-          d.id === designId ? { ...d, status: 'generating' as any } : d
-        )
-      };
+            ...prev,
+            designs: prev.designs.map(d => 
+              d.id === designId ? { ...d, status: 'generating' } : d
+            )
+          };
     });
 
     try {
@@ -171,7 +171,7 @@ export default function KeywordStudio() {
               >
                 {catalog.categories.map((cat) => (
                   <optgroup key={cat.id} label={cat.name}>
-                    {cat.products.map((prod: any) => (
+                    {cat.products.map((prod) => (
                       <option key={prod.id} value={prod.id}>
                         {prod.name}
                       </option>
@@ -210,7 +210,7 @@ export default function KeywordStudio() {
                 id="style-select"
                 className="mx-2 rounded-xl bg-paper-1 px-4 py-3 font-mono text-sm text-ink focus:outline-none"
                 value={style}
-                onChange={(e) => setStyle(e.target.value as any)}
+                onChange={(e) => setStyle(e.target.value as "raster" | "svg")}
               >
                 <option value="raster">Streetwear Raster</option>
                 <option value="svg">Minimalist Line Art</option>

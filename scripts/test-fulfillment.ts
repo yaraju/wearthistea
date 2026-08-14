@@ -1,3 +1,4 @@
+import { FulfillInput } from "../src/lib/print-provider";
 import dotenv from "dotenv";
 dotenv.config();
 console.log("PRINTROVE_PRODUCT_ID:", process.env.PRINTROVE_PRODUCT_ID);
@@ -35,7 +36,7 @@ async function main() {
   };
 
   try {
-    const result = await fulfill(input as any);
+    const result = await fulfill(input as FulfillInput);
     console.log("Fulfillment result:", JSON.stringify(result, null, 2));
     
     if (result.productId) {

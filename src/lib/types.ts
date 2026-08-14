@@ -53,3 +53,19 @@ export interface GenerateResponse {
   designs: DesignDTO[];
   options: VariantOptionsDTO;
 }
+
+export interface CatalogProduct {
+  id: number;
+  name: string;
+  colors: string[];
+}
+
+export interface CatalogCategory {
+  id: number;
+  name: string;
+  products: CatalogProduct[];
+}
+
+export interface CatalogResponse {
+  categories: CatalogCategory[];
+}

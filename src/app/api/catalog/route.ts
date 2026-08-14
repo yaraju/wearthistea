@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { getCategories, getParentProducts, getStockCount } from "@/lib/printrove";
+import { getCategories, getParentProducts, getStockCount, PrintroveProduct } from "@/lib/printrove";
 import { settings } from "@/config/settings";
+import { CatalogCategory } from "@/lib/types";
 
 export const runtime = "nodejs";
 
@@ -26,7 +27,7 @@ export async function GET() {
     const categoryMap = categories.reduce((acc, cat) => {
       acc[cat.id] = { ...cat, products: [] };
       return acc;
-    }, {} as Record<number, any>);
+    }, {} as Record<number, CatalogCategory & { products: PrintroveProduct[] }>);
 
     parentProducts.forEach(p => {
       if (categoryMap[p.category_id]) {
@@ -43,10 +44,10 @@ export async function GET() {
 
     // Filter out categories that have no products
     const resultCategories = Object.values(categoryMap)
-      .map((cat: any) => ({
+      .map((cat) => ({
         ...cat,
-        products: cat.products
-          .map((p: any) => {
+        products: (cat.products as PrintroveProduct[])
+          .map((p) => {
             const colors = inStock[p.id] ? Array.from(inStock[p.id]) : [];
             
             return {
@@ -55,9 +56,9 @@ export async function GET() {
               colors: colors.length > 0 ? colors : ["Black", "White"] // Fallback colors if we can't get stock
             };
           })
-          .filter((p: any) => p.colors.length > 0)
+          .filter((p) => p.colors.length > 0)
       }))
-      .filter((cat: any) => cat.products.length > 0);
+      .filter((cat) => cat.products.length > 0);
 
     return NextResponse.json({
       categories: resultCategories

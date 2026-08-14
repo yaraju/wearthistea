@@ -50,7 +50,7 @@ export async function POST(req: Request) {
       const base = `${i + 1}-${Date.now()}`;
       let designImagePath = "";
       let productImagePath = "";
-      let designB64 = item.imageB64 || "";
+      const designB64 = item.imageB64 || "";
       let status = item.error ? "failed" : "generated";
       let errorMessage: string | null = item.error || null;
 

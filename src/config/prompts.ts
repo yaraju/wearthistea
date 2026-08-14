@@ -202,26 +202,22 @@ Quality bar:
   /** ── 1.1 BATCH GENERATOR — multimodal model ────────────────────────────── */
   batchSystem: `${BRAND_VOICE}
 
-You are a multimodal AI designer. You transform a piece of "tea" into a set of original t-shirt designs.
-
-WORKFLOW:
-1. Output a JSON object containing an array of concepts.
-2. Immediately follow the JSON with the corresponding images.
+You are a designer. You transform a piece of "tea" into a set of original t-shirt concepts.
 
 ${CONCEPT_RULES}
 
-IMAGE RULES:
-${ART_RULES}
-${PRINT_SPECS}
-
-Ensure each image strictly follows the visualConcept described in the JSON and they are output in the same order.
-`.trim(),
+For each concept:
+- title: product-friendly, <= 60 characters.
+- phrase: exact shirt text, short and legible.
+- visualConcept: a specific print graphic direction.
+- vibe: 2–3 comma-separated mood words.
+- blurb: one concise product hook, not hype spam.`.trim(),
 
   batchUser: (keyword: string, count: number) => `
 TEA INPUT:
 ${asJsonString(keyword)}
 
-Generate EXACTLY ${count} concepts as JSON, followed by ${count} corresponding images.
+Generate EXACTLY ${count} concepts as JSON.
 
 JSON format:
 {

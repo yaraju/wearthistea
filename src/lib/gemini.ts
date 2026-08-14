@@ -146,7 +146,7 @@ export async function generateBatch(
         systemInstruction: prompts.batchSVGSystem,
         temperature: settings.gemini.textTemperature,
         responseMimeType: "application/json",
-        responseSchema: prompts.conceptSVGSchema as any,
+        responseSchema: prompts.conceptSVGSchema as unknown as Record<string, unknown>,
       },
     });
 
@@ -184,56 +184,54 @@ export async function generateBatch(
     );
   }
 
-  const model = settings.gemini.imageModel;
+  if (mode === "raster") {
+    // 1. Generate concepts using text model
+    const conceptRes = await ai().models.generateContent({
+      model: settings.gemini.textModel,
+      contents: [
+        { role: "user", parts: [{ text: prompts.conceptUser(keyword, count) }] },
+      ],
+      config: {
+        systemInstruction: prompts.conceptSystem,
+        temperature: settings.gemini.textTemperature,
+        responseMimeType: "application/json",
+        responseSchema: prompts.conceptSchema as unknown as Record<string, unknown>,
+      },
+    });
 
-  const res = await ai().models.generateContent({
-    model,
-    contents: [
-      { role: "user", parts: [{ text: prompts.batchUser(keyword, count) }] },
-    ],
-    config: {
-      systemInstruction: prompts.batchSystem,
-      temperature: settings.gemini.textTemperature,
-      responseModalities: ["IMAGE"],
-    },
-  });
+    const conceptsJson = conceptRes.text;
+    if (!conceptsJson) throw new Error("Concept model returned no text.");
 
-  const parts = res.candidates?.[0]?.content?.parts ?? [];
-  let jsonText = "";
-  const images: string[] = [];
-
-  for (const part of parts) {
-    if (part.text) {
-      jsonText += part.text;
-    } else if (part.inlineData?.data) {
-      images.push(part.inlineData.data);
+    let parsed: { concepts: Concept[] };
+    try {
+      parsed = JSON.parse(conceptsJson);
+    } catch {
+      throw new Error(`Concept model returned non-JSON: ${conceptsJson.slice(0, 200)}…`);
     }
-  }
 
-  // Extract JSON from text block (handle potential markdown formatting)
-  const jsonMatch = jsonText.match(/\{[\s\S]*\}/);
-  const cleanJson = jsonMatch ? jsonMatch[0] : jsonText;
+    const concepts = (parsed.concepts ?? []).filter(
+      (c): c is Concept => Boolean(c?.title && c?.phrase && c?.visualConcept)
+    );
 
-  let parsed: { concepts?: Concept[] };
-  try {
-    parsed = JSON.parse(cleanJson);
-  } catch (err) {
-    throw new Error(
-      `Batch model returned non-JSON text. ${
-        images.length
-      } images received, but concepts failed to parse. Text: ${cleanJson.slice(0, 200)}…`
+    // 2. Generate images in parallel using the existing generateImage function
+    return Promise.all(
+      concepts.map(async (c) => {
+        let imageB64: string | undefined;
+        let error: string | undefined;
+        try {
+          // Use the specific visual concept for this image
+          imageB64 = await generateImage(
+            `Design for a "${keyword}" themed t-shirt. Concept: ${c.visualConcept}. Phrase: ${c.phrase}`
+          );
+        } catch (err) {
+          error = err instanceof Error ? err.message : String(err);
+        }
+        return { ...c, imageB64, error };
+      })
     );
   }
 
-  const concepts = (parsed.concepts ?? []).filter(
-    (c): c is Concept => Boolean(c?.title && c?.phrase && c?.visualConcept)
-  );
-
-  return concepts.map((c, i) => ({
-    ...c,
-    imageB64: images[i],
-    error: images[i] ? undefined : "Image missing in batch response",
-  }));
+  return [];
 }
 
 /**
