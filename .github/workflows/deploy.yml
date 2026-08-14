@@ -49,25 +49,25 @@ jobs:
         run: |
           # Clean variables: remove newlines and optional surrounding quotes
           clean_var() {
-            tr -d '\n\r' | sed "s/^'//;s/'$//;s/^\"//;s/\"$//;s/ *$//"
+            tr -d '\n\r' | sed "s/^ *//;s/ *$//;s/^'//;s/'$//;s/^\"//;s/\"$//;"
           }
           
           echo -n "variant_map=" >> $GITHUB_OUTPUT
           cat <<'EOF' | clean_var >> $GITHUB_OUTPUT
-${{ secrets.PRINTROVE_VARIANT_MAP }}
-EOF
+          ${{ secrets.PRINTROVE_VARIANT_MAP }}
+          EOF
           echo "" >> $GITHUB_OUTPUT
 
           echo -n "auth_user=" >> $GITHUB_OUTPUT
           cat <<'EOF' | clean_var >> $GITHUB_OUTPUT
-${{ secrets.BASIC_AUTH_USER }}
-EOF
+          ${{ secrets.BASIC_AUTH_USER }}
+          EOF
           echo "" >> $GITHUB_OUTPUT
 
           echo -n "auth_pass=" >> $GITHUB_OUTPUT
           cat <<'EOF' | clean_var >> $GITHUB_OUTPUT
-${{ secrets.BASIC_AUTH_PASSWORD }}
-EOF
+          ${{ secrets.BASIC_AUTH_PASSWORD }}
+          EOF
           echo "" >> $GITHUB_OUTPUT
 
       - name: Build and Push Container
