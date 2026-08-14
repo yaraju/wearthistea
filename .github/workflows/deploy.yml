@@ -78,5 +78,4 @@ jobs:
 
       - name: Deploy to Firebase Hosting
         run: |
-          npx --yes firebase-tools target:apply hosting app ${{ env.PROJECT_ID }} --project ${{ env.PROJECT_ID }}
-          npx --yes firebase-tools deploy --only hosting:app --project ${{ env.PROJECT_ID }} --non-interactive
+          npx --yes firebase-tools deploy --only hosting --project ${{ env.PROJECT_ID }} --non-interactive || (npx --yes firebase-tools hosting:sites:list --project ${{ env.PROJECT_ID }} && exit 1)
