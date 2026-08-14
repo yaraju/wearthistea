@@ -42,6 +42,8 @@ model Design {
   // Base64 copy of the print-ready design — used as fallback when the file is
   // missing (e.g. after a Railway redeploy wipes the ephemeral filesystem).
   designImageData  String? @db.Text
+  // For SVG-based designs, the original vector source.
+  designSVGData    String? @db.Text
 
   // Lifecycle: generated -> pending (queued for approval) -> approved -> published | rejected | failed
   status   String  @default("generated")

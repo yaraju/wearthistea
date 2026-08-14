@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { generateConcepts, generateImage } from "@/lib/gemini";
+import { generateBatch } from "@/lib/gemini";
 import { compositeOnTee } from "@/lib/mockup";
 import { saveImage } from "@/lib/storage";
 import { getProvider } from "@/lib/print-provider";
@@ -16,6 +16,7 @@ const Body = z.object({
   category: z.string().optional(),
   productType: z.string().optional(),
   color: z.string().optional(),
+  style: z.enum(["raster", "svg"]).optional().default("raster"),
 });
 
 export async function POST(req: Request) {
@@ -29,18 +30,19 @@ export async function POST(req: Request) {
     );
   }
 
-  const { keyword, category, productType, color } = body;
+  const { keyword, category, productType, color, style } = body;
 
   try {
     const count = settings.optionsPerKeyword;
-    const concepts = await generateConcepts(keyword, count);
+    // Step 1: Unified Batched Call (Concepts + Images/SVG)
+    const batchItems = await generateBatch(keyword, count, style);
 
     const batch = await prisma.batch.create({ data: { keyword } });
 
-    // For each concept: render the clean print file + the product shot in parallel.
-    const designPromises = concepts.map(async (concept, i) => {
+    // Step 2: Process batch items in parallel (Storage + Database)
+    const designPromises = batchItems.map(async (item, i) => {
       const c = {
-        ...concept,
+        ...item,
         category,
         productType,
         color: color || settings.printify.defaultColor,
@@ -48,34 +50,35 @@ export async function POST(req: Request) {
       const base = `${i + 1}-${Date.now()}`;
       let designImagePath = "";
       let productImagePath = "";
-      let designB64 = "";
-      let status = "generated";
-      let errorMessage: string | null = null;
+      let designB64 = item.imageB64 || "";
+      let status = item.error ? "failed" : "generated";
+      let errorMessage: string | null = item.error || null;
 
-      try {
-        // One paid AI call: the clean, print-ready design.
-        designB64 = await generateImage(prompts.designImage(c));
-        designImagePath = await saveImage(batch.id, `${base}-design.png`, designB64);
+      if (!item.error && designB64) {
+        try {
+          // Save the clean print file
+          designImagePath = await saveImage(batch.id, `${base}-design.png`, designB64);
 
-        // Free: composite that same file onto a tee mockup for the preview.
-        if (settings.images.generateProductShot) {
-          try {
-            const productB64 = await compositeOnTee(
-              designB64,
-              c.color || settings.printify.defaultColor
-            );
-            productImagePath = await saveImage(
-              batch.id,
-              `${base}-product.png`,
-              productB64
-            );
-          } catch {
-            // Preview is optional — fall back to showing the raw design file.
+          // Create the mockup preview (Free/Local)
+          if (settings.images.generateProductShot) {
+            try {
+              const productB64 = await compositeOnTee(
+                designB64,
+                c.color || settings.printify.defaultColor
+              );
+              productImagePath = await saveImage(
+                batch.id,
+                `${base}-product.png`,
+                productB64
+              );
+            } catch {
+              // Mockup is optional, fallback to design file
+            }
           }
+        } catch (err) {
+          status = "failed";
+          errorMessage = err instanceof Error ? err.message : String(err);
         }
-      } catch (err) {
-        status = "failed";
-        errorMessage = err instanceof Error ? err.message : String(err);
       }
 
       return await prisma.design.create({
@@ -86,14 +89,14 @@ export async function POST(req: Request) {
           visualConcept: c.visualConcept,
           vibe: c.vibe ?? null,
           blurb: c.blurb ?? null,
-          designPrompt: prompts.designImage(c),
+          designPrompt: style === "svg" ? "SVG Batch" : prompts.designImage(c),
           productPrompt: `[mockup composite of clean design on ${
             c.color || settings.printify.defaultColor
           } tee]`,
           designImagePath,
           productImagePath,
-          // Store base64 so approval can proceed even after a redeploy wipes the disk.
           designImageData: designImagePath ? designB64 : null,
+          designSVGData: item.svg ?? null,
           status,
           errorMessage,
         },

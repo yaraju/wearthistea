@@ -2,7 +2,7 @@
 
 import { useState, useEffect, type ChangeEvent, type FormEvent } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
-import { Sparkles, Loader2, Check, AlertTriangle, ArrowRight } from "lucide-react";
+import { Sparkles, Loader2, Check, AlertTriangle, ArrowRight, RotateCcw } from "lucide-react";
 import type { DesignDTO, GenerateResponse, VariantOptionsDTO } from "@/lib/types";
 
 const SKELETON_COUNT = 5; // matches default settings.optionsPerKeyword
@@ -29,6 +29,7 @@ export default function KeywordStudio() {
   const [catalog, setCatalog] = useState<{ categories: any[] }>({ categories: [] });
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
   const [selectedColor, setSelectedColor] = useState("Black");
+  const [style, setStyle] = useState<"raster" | "svg">("raster");
   const [examples, setExamples] = useState<string[]>([]);
   const reduce = useReducedMotion();
 
@@ -84,7 +85,8 @@ export default function KeywordStudio() {
           keyword: tea,
           category: selectedCategory?.name,
           productType: selectedProduct?.name,
-          color: selectedColor
+          color: selectedColor,
+          style
         }),
       });
       const data = await res.json();
@@ -94,6 +96,52 @@ export default function KeywordStudio() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Generation failed.");
       setPhase("error");
+    }
+  }
+
+  async function retryDesign(designId: string) {
+    if (!result) return;
+    
+    setResult(prev => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        designs: prev.designs.map(d => 
+          d.id === designId ? { ...d, status: 'generating' as any } : d
+        )
+      };
+    });
+
+    try {
+      const res = await fetch("/api/generate/retry", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ designId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Retry failed.");
+      
+      const updatedDesign = data.design as DesignDTO;
+      setResult(prev => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          designs: prev.designs.map(d => 
+            d.id === designId ? updatedDesign : d
+          )
+        };
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Retry failed.";
+      setResult(prev => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          designs: prev.designs.map(d => 
+            d.id === designId ? { ...d, status: 'failed', errorMessage: msg } : d
+          )
+        };
+      });
     }
   }
 
@@ -109,6 +157,7 @@ export default function KeywordStudio() {
               </label>
               <select
                 id="product-select"
+                name="product-select"
                 className="mx-2 rounded-xl bg-paper-1 px-4 py-3 font-mono text-sm text-ink focus:outline-none"
                 value={selectedProduct?.id || ""}
                 onChange={(e) => {
@@ -152,6 +201,21 @@ export default function KeywordStudio() {
                 ))}
               </div>
             </div>
+
+            <div className="flex flex-col gap-2">
+              <label htmlFor="style-select" className="px-4 font-mono text-xs font-bold uppercase tracking-wider text-ink-soft">
+                Art Style
+              </label>
+              <select
+                id="style-select"
+                className="mx-2 rounded-xl bg-paper-1 px-4 py-3 font-mono text-sm text-ink focus:outline-none"
+                value={style}
+                onChange={(e) => setStyle(e.target.value as any)}
+              >
+                <option value="raster">Streetwear Raster</option>
+                <option value="svg">Minimalist Line Art</option>
+              </select>
+            </div>
           </div>
 
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end border-t border-ink/5 pt-3">
@@ -160,6 +224,7 @@ export default function KeywordStudio() {
             </label>
             <textarea
               id="tea"
+              name="tea"
               rows={1}
               value={keyword}
               onChange={(e) => setKeyword(e.target.value)}
@@ -273,6 +338,7 @@ export default function KeywordStudio() {
                     index={i}
                     reduce={reduce}
                     options={result.options}
+                    onRetry={retryDesign}
                   />
                 ))}
               </div>
@@ -325,11 +391,13 @@ function DesignCard({
   index,
   reduce,
   options,
+  onRetry,
 }: {
   design: DesignDTO;
   index: number;
   reduce: boolean | null;
   options: VariantOptionsDTO;
+  onRetry?: (id: string) => void;
 }) {
   const [status, setStatus] = useState(design.status);
   const [busy, setBusy] = useState(false);
@@ -358,7 +426,8 @@ function DesignCard({
     (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
       setForm((f) => ({ ...f, [k]: e.target.value }));
 
-  const failed = status === "failed";
+  const failed = design.status === "failed";
+  const generating = design.status === "generating";
   const queued = status === "pending";
 
   async function placeOrder(e: FormEvent) {
@@ -463,6 +532,19 @@ function DesignCard({
                 {friendlyError(design.errorMessage)}
               </p>
             )}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onRetry?.(design.id);
+              }}
+              className="mt-2 inline-flex items-center gap-1 font-mono text-xs font-bold uppercase tracking-widest text-pink transition-colors hover:text-pink-ink"
+            >
+              <RotateCcw className="h-3 w-3" /> Retry Render
+            </button>
+          </div>
+        ) : generating ? (
+          <div className="flex items-center gap-1.5 font-mono text-xs text-ink-soft">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" /> rerendering…
           </div>
         ) : queued ? (
           <p className="flex items-center gap-1.5 font-mono text-sm font-bold text-tea">
@@ -474,6 +556,8 @@ function DesignCard({
               <label className="flex-1">
                 <span className="kicker text-ink-soft">Size</span>
                 <select
+                  id="size"
+                  name="size"
                   aria-label="Size"
                   value={form.size}
                   onChange={set("size")}
@@ -489,6 +573,8 @@ function DesignCard({
               <label className="flex-1">
                 <span className="kicker text-ink-soft">Color</span>
                 <select
+                  id="color"
+                  name="color"
                   aria-label="Color"
                   value={form.color}
                   onChange={set("color")}
@@ -504,6 +590,8 @@ function DesignCard({
               <label className="w-16">
                 <span className="kicker text-ink-soft">Qty</span>
                 <input
+                  id="quantity"
+                  name="quantity"
                   aria-label="Quantity"
                   type="number"
                   min={1}
@@ -518,8 +606,11 @@ function DesignCard({
             {needsShipping && (
               <div className="space-y-2.5 border-t border-line pt-2.5">
                 <input
+                  id="name"
+                  name="name"
                   required
                   aria-label="Full name"
+                  autoComplete="name"
                   placeholder="Full name"
                   value={form.name}
                   onChange={set("name")}
@@ -527,17 +618,23 @@ function DesignCard({
                 />
                 <div className="flex gap-2">
                   <input
+                    id="phone"
+                    name="phone"
                     required
                     aria-label="Phone"
                     type="tel"
+                    autoComplete="tel"
                     placeholder="Phone"
                     value={form.phone}
                     onChange={set("phone")}
                     className={FIELD_CLS}
                   />
                   <input
+                    id="email"
+                    name="email"
                     aria-label="Email"
                     type="email"
+                    autoComplete="email"
                     placeholder="Email (optional)"
                     value={form.email}
                     onChange={set("email")}
@@ -545,15 +642,21 @@ function DesignCard({
                   />
                 </div>
                 <input
+                  id="address1"
+                  name="address1"
                   required
                   aria-label="Address line 1"
+                  autoComplete="address-line1"
                   placeholder="Address line 1"
                   value={form.address1}
                   onChange={set("address1")}
                   className={FIELD_CLS}
                 />
                 <input
+                  id="address2"
+                  name="address2"
                   aria-label="Address line 2"
+                  autoComplete="address-line2"
                   placeholder="Address line 2 (optional)"
                   value={form.address2}
                   onChange={set("address2")}
@@ -561,14 +664,20 @@ function DesignCard({
                 />
                 <div className="flex gap-2">
                   <input
+                    id="city"
+                    name="city"
                     aria-label="City"
+                    autoComplete="address-level2"
                     placeholder="City"
                     value={form.city}
                     onChange={set("city")}
                     className={FIELD_CLS}
                   />
                   <input
+                    id="state"
+                    name="state"
                     aria-label="State"
+                    autoComplete="address-level1"
                     placeholder="State"
                     value={form.state}
                     onChange={set("state")}
@@ -577,15 +686,21 @@ function DesignCard({
                 </div>
                 <div className="flex gap-2">
                   <input
+                    id="pincode"
+                    name="pincode"
                     aria-label="PIN or ZIP code"
+                    autoComplete="postal-code"
                     placeholder="PIN / ZIP"
                     value={form.pincode}
                     onChange={set("pincode")}
                     className={FIELD_CLS}
                   />
                   <select
+                    id="country"
+                    name="country"
                     aria-label="Country"
                     required
+                    autoComplete="country-name"
                     value={form.country}
                     onChange={set("country")}
                     className={FIELD_CLS}

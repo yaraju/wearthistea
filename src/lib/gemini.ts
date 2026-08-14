@@ -1,6 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { settings } from "@/config/settings";
 import { prompts, type Concept } from "@/config/prompts";
+import { svgToPng } from "./svg-utils";
 
 let client: GoogleGenAI | null = null;
 
@@ -110,6 +111,152 @@ export async function generateConcepts(
   );
   if (concepts.length === 0) throw new Error("No valid concepts were produced.");
   return concepts.slice(0, count);
+}
+
+export interface BatchItem extends Concept {
+  imageB64?: string;
+  error?: string;
+}
+
+/**
+ * Modernized: Generate concepts AND images in a single multimodal call.
+ * Supports both Raster (multimodal) and SVG (structured text) modes.
+ */
+export async function generateBatch(
+  keyword: string,
+  count: number,
+  mode: "raster" | "svg" = "raster"
+): Promise<BatchItem[]> {
+  if (!hasApiKey()) {
+    // No Gemini key — return shuffled dummy concepts so the UI workflow completes.
+    return DUMMY_CONCEPTS.slice(0, count).map((c) => ({
+      ...c,
+      imageB64: DUMMY_PNG_B64,
+      blurb: `[DEMO] ${c.blurb ?? ""}`.trim(),
+    }));
+  }
+
+  if (mode === "svg") {
+    const res = await ai().models.generateContent({
+      model: settings.gemini.textModel,
+      contents: [
+        { role: "user", parts: [{ text: prompts.batchSVGUser(keyword, count) }] },
+      ],
+      config: {
+        systemInstruction: prompts.batchSVGSystem,
+        temperature: settings.gemini.textTemperature,
+        responseMimeType: "application/json",
+        responseSchema: prompts.conceptSVGSchema as any,
+      },
+    });
+
+    const text = res.text;
+    if (!text) throw new Error("SVG model returned no text.");
+
+    let parsed: { concepts?: Concept[] };
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw new Error(`SVG model returned non-JSON: ${text.slice(0, 200)}…`);
+    }
+
+    const concepts = (parsed.concepts ?? []).filter(
+      (c): c is Concept => Boolean(c?.title && c?.phrase && c?.visualConcept)
+    );
+
+    return Promise.all(
+      concepts.map(async (c) => {
+        let imageB64 = "";
+        let error: string | undefined;
+        if (c.svg) {
+          try {
+            imageB64 = await svgToPng(c.svg);
+          } catch (err) {
+            error = `SVG rendering failed: ${
+              err instanceof Error ? err.message : String(err)
+            }`;
+          }
+        } else {
+          error = "SVG code missing in response";
+        }
+        return { ...c, imageB64, error };
+      })
+    );
+  }
+
+  const model = settings.gemini.imageModel;
+
+  const res = await ai().models.generateContent({
+    model,
+    contents: [
+      { role: "user", parts: [{ text: prompts.batchUser(keyword, count) }] },
+    ],
+    config: {
+      systemInstruction: prompts.batchSystem,
+      temperature: settings.gemini.textTemperature,
+      responseModalities: ["IMAGE"],
+    },
+  });
+
+  const parts = res.candidates?.[0]?.content?.parts ?? [];
+  let jsonText = "";
+  const images: string[] = [];
+
+  for (const part of parts) {
+    if (part.text) {
+      jsonText += part.text;
+    } else if (part.inlineData?.data) {
+      images.push(part.inlineData.data);
+    }
+  }
+
+  // Extract JSON from text block (handle potential markdown formatting)
+  const jsonMatch = jsonText.match(/\{[\s\S]*\}/);
+  const cleanJson = jsonMatch ? jsonMatch[0] : jsonText;
+
+  let parsed: { concepts?: Concept[] };
+  try {
+    parsed = JSON.parse(cleanJson);
+  } catch (err) {
+    throw new Error(
+      `Batch model returned non-JSON text. ${
+        images.length
+      } images received, but concepts failed to parse. Text: ${cleanJson.slice(0, 200)}…`
+    );
+  }
+
+  const concepts = (parsed.concepts ?? []).filter(
+    (c): c is Concept => Boolean(c?.title && c?.phrase && c?.visualConcept)
+  );
+
+  return concepts.map((c, i) => ({
+    ...c,
+    imageB64: images[i],
+    error: images[i] ? undefined : "Image missing in batch response",
+  }));
+}
+
+/**
+ * Generate a single SVG for a concept (used for retries).
+ */
+export async function generateSingleSVG(concept: Concept): Promise<string> {
+  if (!hasApiKey()) return DUMMY_PNG_B64;
+
+  const res = await ai().models.generateContent({
+    model: settings.gemini.textModel,
+    contents: [{ role: "user", parts: [{ text: prompts.svgUser(concept) }] }],
+    config: {
+      systemInstruction: prompts.svgSystem,
+      temperature: settings.gemini.textTemperature,
+    },
+  });
+
+  const text = res.text;
+  if (!text) throw new Error("SVG model returned no text.");
+
+  const match = text.match(/<svg[\s\S]*<\/svg>/);
+  const svg = match ? match[0] : text;
+  return svgToPng(svg);
 }
 
 /**

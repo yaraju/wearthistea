@@ -24,6 +24,7 @@ export interface Concept {
   category?: string;
   productType?: string;
   color?: string;
+  svg?: string;
 }
 
 const clean = (value: string) =>
@@ -64,6 +65,17 @@ CONCEPT RULES:
 - Avoid vague visualConcepts like "make it iconic" or "internet chaos aesthetic."
 - Vary the set: text-heavy, character-driven, object-driven, badge/emblem, mascot, and scene ideas.
 - Avoid repeating the same pun or the same "tea cup" idea across concepts.
+`.trim();
+
+/** SVG vector art rules. */
+const SVG_RULES = `
+SVG RULES:
+- Clean, minimalist streetwear line art.
+- Use only valid SVG elements (<path>, <circle>, <rect>, <g>, <text>).
+- No external links, images, or CSS <style> blocks (use inline attributes).
+- Optimized for chest print: centered in a 500x600 viewBox.
+- Single color (high contrast to garment) or very limited punchy palette.
+- Output valid, clean XML code as a string.
 `.trim();
 
 /** Legal and print guardrails reused inside image prompts. */
@@ -186,6 +198,122 @@ Quality bar:
     },
     required: ["concepts"],
   } as const,
+
+  /** ── 1.1 BATCH GENERATOR — multimodal model ────────────────────────────── */
+  batchSystem: `${BRAND_VOICE}
+
+You are a multimodal AI designer. You transform a piece of "tea" into a set of original t-shirt designs.
+
+WORKFLOW:
+1. Output a JSON object containing an array of concepts.
+2. Immediately follow the JSON with the corresponding images.
+
+${CONCEPT_RULES}
+
+IMAGE RULES:
+${ART_RULES}
+${PRINT_SPECS}
+
+Ensure each image strictly follows the visualConcept described in the JSON and they are output in the same order.
+`.trim(),
+
+  batchUser: (keyword: string, count: number) => `
+TEA INPUT:
+${asJsonString(keyword)}
+
+Generate EXACTLY ${count} concepts as JSON, followed by ${count} corresponding images.
+
+JSON format:
+{
+  "concepts": [
+    {
+      "title": "string",
+      "phrase": "string",
+      "visualConcept": "string",
+      "vibe": "string",
+      "blurb": "string"
+    }
+  ]
+}
+`.trim(),
+
+  /** ── 1.2 SVG BATCH GENERATOR — text model ──────────────────────────────── */
+  batchSVGSystem: `${BRAND_VOICE}
+
+You are a vector art designer. You generate a set of t-shirt concepts and their corresponding SVG code.
+
+WORKFLOW:
+1. Output a JSON object containing an array of concepts.
+2. For each concept, include an "svg" field containing the clean SVG code.
+
+${CONCEPT_RULES}
+${SVG_RULES}
+`.trim(),
+
+  batchSVGUser: (keyword: string, count: number) => `
+TEA INPUT:
+${asJsonString(keyword)}
+
+Generate EXACTLY ${count} concepts as JSON, including the SVG code for each.
+
+JSON format:
+{
+  "concepts": [
+    {
+      "title": "string",
+      "phrase": "string",
+      "visualConcept": "string",
+      "vibe": "string",
+      "blurb": "string",
+      "svg": "string (valid SVG XML)"
+    }
+  ]
+}
+`.trim(),
+
+  conceptSVGSchema: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      concepts: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            title: { type: "string" },
+            phrase: { type: "string" },
+            visualConcept: { type: "string" },
+            vibe: { type: "string" },
+            blurb: { type: "string" },
+            svg: { type: "string", description: "Clean SVG XML code" },
+          },
+          required: ["title", "phrase", "visualConcept", "vibe", "blurb", "svg"],
+        },
+      },
+    },
+    required: ["concepts"],
+  } as const,
+
+  /** ── 1.3 SINGLE SVG GENERATOR ─────────────────────────────────────────── */
+  svgSystem: `${BRAND_VOICE}
+
+You are a vector art specialist. You generate clean, streetwear-style SVG code for t-shirt designs.
+
+${SVG_RULES}
+`.trim(),
+
+  svgUser: (c: Concept) => `
+Generate a single streetwear SVG graphic for this concept:
+Title: ${c.title}
+Phrase: ${c.phrase}
+Visual: ${c.visualConcept}
+Vibe: ${c.vibe}
+
+Target Garment Color: ${c.color || "Black"}
+
+Return ONLY the SVG code. No markdown. No commentary.
+`.trim(),
 
   /** ── 2. CLEAN PRINT-READY ARTWORK — image model ─────────────────────────── */
   designImage: (c: Concept) =>

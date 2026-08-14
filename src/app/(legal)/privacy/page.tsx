@@ -73,9 +73,9 @@ export default function PrivacyPage() {
             of purchase.
           </li>
           <li>
-            <strong>Infrastructure.</strong> The Service is hosted on Railway
-            and uses a Neon (PostgreSQL) database to store batches, designs, and
-            prompts.
+            <strong>Infrastructure.</strong> The Service is hosted on Google
+            Cloud and Firebase, and uses a Neon (PostgreSQL) database to store
+            batches, designs, and prompts.
           </li>
         </List>
       </Section>
