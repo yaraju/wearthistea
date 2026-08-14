@@ -163,7 +163,7 @@ export default function KeywordStudio() {
                 onChange={(e) => {
                   const prodId = parseInt(e.target.value);
                   const prod = catalog.categories.flatMap(c => c.products).find(p => p.id === prodId);
-                  setSelectedProduct(prod);
+                  setSelectedProduct(prod || null);
                   if (prod && !prod.colors.includes(selectedColor)) {
                     setSelectedColor(prod.colors[0] || "Black");
                   }

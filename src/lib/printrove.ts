@@ -324,7 +324,7 @@ export async function getStockCount(params: {
       id: item.id,
       product_id: item.parent_id || item.product_id, // stock items often refer to parent_id as the base product
       variant_id: item.id,
-      quantity: item.stock ?? item.quantity,
+      quantity: item.stock ?? item.quantity ?? 0,
       availability: item.is_instock ? "in_stock" : "out_of_stock",
       category_id: item.category_id,
       color: color || "Unknown",

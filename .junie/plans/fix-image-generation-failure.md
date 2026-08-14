@@ -110,6 +110,7 @@ Enhance the frontend to handle the new batched responses.
 
 ### ✓ Step 5: Finalize Migration and Deploy
 Push changes to remote and remove Railway triggers.
-- Remove `railway.json`.
-- Update Privacy Policy and code comments to reflect GCP/Firebase migration.
-- Push changes to GitHub and verify GHA workflow configuration.
+- ✓ Remove `railway.json`.
+- ✓ Update Privacy Policy and code comments to reflect GCP/Firebase migration.
+- ✓ Push changes to GitHub and verify GHA workflow configuration.
+- ✓ Resolve ESLint errors and fix deployment environment variable parsing.
