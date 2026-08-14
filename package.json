@@ -17,6 +17,7 @@
   "dependencies": {
     "@google-cloud/storage": "^7.21.0",
     "@google/genai": "^2.8.0",
+    "@imgly/background-removal-node": "^1.4.5",
     "@prisma/client": "^6.19.3",
     "framer-motion": "^12.40.0",
     "lucide-react": "^1.18.0",

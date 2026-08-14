@@ -9,7 +9,7 @@ function hasApiKey(): boolean {
   return Boolean(process.env.GEMINI_API_KEY);
 }
 
-function ai(): GoogleGenAI {
+export function ai(): GoogleGenAI {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new Error(
@@ -119,8 +119,8 @@ export interface BatchItem extends Concept {
 }
 
 /**
- * Modernized: Generate concepts AND images in a single multimodal call.
- * Supports both Raster (multimodal) and SVG (structured text) modes.
+ * Modernized: Generate concepts AND SVG previews in a single fast call.
+ * Both Raster and SVG modes start with minimalist vector previews (Stage 1).
  */
 export async function generateBatch(
   keyword: string,
@@ -136,102 +136,53 @@ export async function generateBatch(
     }));
   }
 
-  if (mode === "svg") {
-    const res = await ai().models.generateContent({
-      model: settings.gemini.textModel,
-      contents: [
-        { role: "user", parts: [{ text: prompts.batchSVGUser(keyword, count) }] },
-      ],
-      config: {
-        systemInstruction: prompts.batchSVGSystem,
-        temperature: settings.gemini.textTemperature,
-        responseMimeType: "application/json",
-        responseSchema: prompts.conceptSVGSchema as unknown as Record<string, unknown>,
-      },
-    });
+  // Use Flash Lite for Stage 1 batching (Concepts + SVG Previews)
+  const res = await ai().models.generateContent({
+    model: settings.gemini.flashLiteModel,
+    contents: [
+      { role: "user", parts: [{ text: prompts.batchSVGUser(keyword, count) }] },
+    ],
+    config: {
+      systemInstruction: prompts.batchSVGSystem,
+      temperature: settings.gemini.textTemperature,
+      responseMimeType: "application/json",
+      responseSchema: prompts.conceptSVGSchema as unknown as Record<string, unknown>,
+    },
+  });
 
-    const text = res.text;
-    if (!text) throw new Error("SVG model returned no text.");
+  const text = res.text;
+  if (!text) throw new Error("Batch model returned no text.");
 
-    let parsed: { concepts?: Concept[] };
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      throw new Error(`SVG model returned non-JSON: ${text.slice(0, 200)}…`);
-    }
-
-    const concepts = (parsed.concepts ?? []).filter(
-      (c): c is Concept => Boolean(c?.title && c?.phrase && c?.visualConcept)
-    );
-
-    return Promise.all(
-      concepts.map(async (c) => {
-        let imageB64 = "";
-        let error: string | undefined;
-        if (c.svg) {
-          try {
-            imageB64 = await svgToPng(c.svg);
-          } catch (err) {
-            error = `SVG rendering failed: ${
-              err instanceof Error ? err.message : String(err)
-            }`;
-          }
-        } else {
-          error = "SVG code missing in response";
-        }
-        return { ...c, imageB64, error };
-      })
-    );
+  let parsed: { concepts?: Concept[] };
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error(`Batch model returned non-JSON: ${text.slice(0, 200)}…`);
   }
 
-  if (mode === "raster") {
-    // 1. Generate concepts using text model
-    const conceptRes = await ai().models.generateContent({
-      model: settings.gemini.textModel,
-      contents: [
-        { role: "user", parts: [{ text: prompts.conceptUser(keyword, count) }] },
-      ],
-      config: {
-        systemInstruction: prompts.conceptSystem,
-        temperature: settings.gemini.textTemperature,
-        responseMimeType: "application/json",
-        responseSchema: prompts.conceptSchema as unknown as Record<string, unknown>,
-      },
-    });
+  const concepts = (parsed.concepts ?? []).filter(
+    (c): c is Concept => Boolean(c?.title && c?.phrase && c?.visualConcept)
+  );
 
-    const conceptsJson = conceptRes.text;
-    if (!conceptsJson) throw new Error("Concept model returned no text.");
-
-    let parsed: { concepts: Concept[] };
-    try {
-      parsed = JSON.parse(conceptsJson);
-    } catch {
-      throw new Error(`Concept model returned non-JSON: ${conceptsJson.slice(0, 200)}…`);
-    }
-
-    const concepts = (parsed.concepts ?? []).filter(
-      (c): c is Concept => Boolean(c?.title && c?.phrase && c?.visualConcept)
-    );
-
-    // 2. Generate images in parallel using the existing generateImage function
-    return Promise.all(
-      concepts.map(async (c) => {
-        let imageB64: string | undefined;
-        let error: string | undefined;
+  return Promise.all(
+    concepts.map(async (c) => {
+      let imageB64 = "";
+      let error: string | undefined;
+      if (c.svg) {
         try {
-          // Use the specific visual concept for this image
-          imageB64 = await generateImage(
-            `Design for a "${keyword}" themed t-shirt. Concept: ${c.visualConcept}. Phrase: ${c.phrase}`
-          );
+          // Even for "raster" mode, we render the SVG as an initial preview.
+          imageB64 = await svgToPng(c.svg);
         } catch (err) {
-          error = err instanceof Error ? err.message : String(err);
+          error = `SVG rendering failed: ${
+            err instanceof Error ? err.message : String(err)
+          }`;
         }
-        return { ...c, imageB64, error };
-      })
-    );
-  }
-
-  return [];
+      } else {
+        error = "SVG code missing in response";
+      }
+      return { ...c, imageB64, error };
+    })
+  );
 }
 
 /**
@@ -296,13 +247,13 @@ export async function generateGossipExamples(): Promise<string[]> {
  * Auto-routes: "imagen*" models use the Images API; everything else uses the
  * Gemini native image output (Nano Banana family).
  */
-export async function generateImage(prompt: string): Promise<string> {
+export async function generateImage(prompt: string, modelOverride?: string): Promise<string> {
   if (!hasApiKey()) {
     // No Gemini key — return a 1×1 transparent placeholder so the pipeline completes.
     return DUMMY_PNG_B64;
   }
 
-  const model = settings.gemini.imageModel;
+  const model = modelOverride || settings.gemini.imageModel;
 
   if (model.toLowerCase().includes("imagen")) {
     const res = await ai().models.generateImages({

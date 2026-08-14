@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { settings } from "@/config/settings";
+import { realizeDesign } from "@/lib/realize";
 
 export const runtime = "nodejs";
 
@@ -49,11 +50,33 @@ export async function POST(req: Request) {
   const design = await prisma.design.findUnique({ where: { id: body.designId } });
   if (!design)
     return NextResponse.json({ error: "Design not found." }, { status: 404 });
+
   if (design.status === "failed")
     return NextResponse.json(
       { error: "This design failed to render — try regenerating." },
       { status: 409 }
     );
+
+  // Stage 2: Realize design if it's still a preview
+  if (design.status === "preview") {
+    try {
+      // Temporarily update to variant colors so realization uses correct palette
+      await prisma.design.update({
+        where: { id: body.designId },
+        data: {
+          variantSize: body.size,
+          variantColor: body.color,
+        }
+      });
+      await realizeDesign(body.designId);
+    } catch (err) {
+      console.error("[Realize] Failed during selection:", err);
+      return NextResponse.json(
+        { error: "Could not finalize the high-res design. Please try again." },
+        { status: 500 }
+      );
+    }
+  }
 
   const c = body.customer;
   const updated = await prisma.design.update({

@@ -50,8 +50,14 @@ export const settings = {
   provider: (process.env.PRINT_PROVIDER ?? "printrove").toLowerCase(),
 
   gemini: {
+    /** Near-instant text/SVG model for Stage 1. */
+    flashLiteModel: process.env.GEMINI_FLASH_LITE_MODEL ?? "gemini-2.5-flash-lite",
     /** Text model that writes the design concepts (titles, phrases, visual ideas). */
     textModel: process.env.GEMINI_TEXT_MODEL ?? "gemini-2.5-flash",
+    /**
+     * High-quality fast image model for Stage 2 realization.
+     */
+    imagenFastModel: process.env.GEMINI_IMAGEN_FAST_MODEL ?? "imagen-4.0-fast-generate-001",
     /**
      * Image model that renders the artwork + product shots.
      * "Nano Banana" family => gemini-2.5-flash-image (default).

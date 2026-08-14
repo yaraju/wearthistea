@@ -35,8 +35,12 @@ export async function POST(req: Request) {
 
   try {
     const count = settings.optionsPerKeyword;
-    // Step 1: Unified Batched Call (Concepts + Images/SVG)
+    // Step 1: Unified Batched Call (Concepts + SVG Previews)
+    const start = Date.now();
     const batchItems = await generateBatch(keyword, count, style);
+    const duration = Date.now() - start;
+    
+    console.log(`[Stage 1] Generated ${count} concepts for "${keyword}" in ${duration}ms`);
 
     const batch = await prisma.batch.create({ data: { keyword } });
 
@@ -52,13 +56,13 @@ export async function POST(req: Request) {
       let designImagePath = "";
       let productImagePath = "";
       const designB64 = item.imageB64 || "";
-      let status = item.error ? "failed" : "generated";
+      let status = item.error ? "failed" : "preview";
       let errorMessage: string | null = item.error || null;
 
       if (!item.error && designB64) {
         try {
-          // Save the clean print file
-          designImagePath = await saveImage(batch.id, `${base}-design.png`, designB64);
+          // Save the initial SVG preview as the design file
+          designImagePath = await saveImage(batch.id, `${base}-preview.png`, designB64);
 
           // Create the mockup preview (Free/Local)
           if (settings.images.generateProductShot) {
@@ -90,7 +94,7 @@ export async function POST(req: Request) {
           visualConcept: c.visualConcept,
           vibe: c.vibe ?? null,
           blurb: c.blurb ?? null,
-          designPrompt: style === "svg" ? "SVG Batch" : prompts.designImage(c),
+          designPrompt: `Stage 1: SVG Preview (${style} mode)`,
           productPrompt: `[mockup composite of clean design on ${
             c.color || settings.printify.defaultColor
           } tee]`,
