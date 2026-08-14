@@ -47,9 +47,14 @@ jobs:
         id: prep
         shell: bash
         run: |
-          # Clean variant map: remove newlines and optional surrounding quotes
-          CLEAN_MAP=$(echo "${{ secrets.PRINTROVE_VARIANT_MAP }}" | tr -d '\n\r' | sed "s/^'//;s/'$//;s/^\"//;s/\"$//")
-          echo "variant_map=$CLEAN_MAP" >> $GITHUB_OUTPUT
+          # Clean variables: remove newlines and optional surrounding quotes
+          clean_var() {
+            echo "$1" | tr -d '\n\r' | sed "s/^'//;s/'$//;s/^\"//;s/\"$//;s/ *$//"
+          }
+          
+          echo "variant_map=$(clean_var "${{ secrets.PRINTROVE_VARIANT_MAP }}")" >> $GITHUB_OUTPUT
+          echo "auth_user=$(clean_var "${{ secrets.BASIC_AUTH_USER }}")" >> $GITHUB_OUTPUT
+          echo "auth_pass=$(clean_var "${{ secrets.BASIC_AUTH_PASSWORD }}")" >> $GITHUB_OUTPUT
 
       - name: Build and Push Container
         run: |-
@@ -82,8 +87,8 @@ jobs:
             PRINTROVE_PRODUCT_ID=${{ secrets.PRINTROVE_PRODUCT_ID }}
             PRINTROVE_PRODUCT_SUBTYPE_ID=${{ secrets.PRINTROVE_PRODUCT_SUBTYPE_ID }}
             PRINTROVE_VARIANT_MAP=${{ steps.prep.outputs.variant_map }}
-            BASIC_AUTH_USER=${{ secrets.BASIC_AUTH_USER }}
-            BASIC_AUTH_PASSWORD=${{ secrets.BASIC_AUTH_PASSWORD }}
+            BASIC_AUTH_USER=${{ steps.prep.outputs.auth_user }}
+            BASIC_AUTH_PASSWORD=${{ steps.prep.outputs.auth_pass }}
           env_vars_update_strategy: overwrite
 
       - name: Deploy to Firebase Hosting

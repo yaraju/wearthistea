@@ -114,3 +114,4 @@ Push changes to remote and remove Railway triggers.
 - ✓ Update Privacy Policy and code comments to reflect GCP/Firebase migration.
 - ✓ Push changes to GitHub and verify GHA workflow configuration.
 - ✓ Resolve ESLint errors and fix deployment environment variable parsing.
+- ✓ Resolve remaining TypeScript errors causing build failures.

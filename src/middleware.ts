@@ -22,7 +22,7 @@ function unauthorized() {
   });
 }
 
-export function proxy(request: NextRequest) {
+export function middleware(request: NextRequest) {
   // Gate disabled unless both credentials are configured.
   if (!USER || !PASSWORD) return NextResponse.next();
 
