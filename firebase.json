@@ -1,5 +1,6 @@
 {
   "hosting": {
+    "site": "wearthistea",
     "public": "public",
     "ignore": [
       "firebase.json",

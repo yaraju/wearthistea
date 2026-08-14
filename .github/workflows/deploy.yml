@@ -78,5 +78,6 @@ jobs:
 
       - name: Deploy to Firebase Hosting
         run: |
-          npx --yes firebase-tools hosting:sites:list --project ${{ env.PROJECT_ID }}
+          # Create the site if it doesn't exist
+          npx --yes firebase-tools hosting:sites:create wearthistea --project ${{ env.PROJECT_ID }} || true
           npx --yes firebase-tools deploy --only hosting --project ${{ env.PROJECT_ID }} --non-interactive
