@@ -61,22 +61,8 @@ jobs:
             --cpu=1
             --min-instances=0
             --max-instances=10
-          env_vars: |-
-            NODE_ENV=production|
-            GCS_BUCKET=${{ secrets.GCS_BUCKET }}|
-            DATABASE_URL=${{ secrets.DATABASE_URL }}|
-            GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}|
-            PRINTIFY_API_TOKEN=${{ secrets.PRINTIFY_API_TOKEN }}|
-            PRINTIFY_SHOP_ID=${{ secrets.PRINTIFY_SHOP_ID }}|
-            PRINT_PROVIDER=${{ secrets.PRINT_PROVIDER }}|
-            PRINTROVE_EMAIL=${{ secrets.PRINTROVE_EMAIL }}|
-            PRINTROVE_PASSWORD=${{ secrets.PRINTROVE_PASSWORD }}|
-            PRINTROVE_PRODUCT_ID=${{ secrets.PRINTROVE_PRODUCT_ID }}|
-            PRINTROVE_PRODUCT_SUBTYPE_ID=${{ secrets.PRINTROVE_PRODUCT_SUBTYPE_ID }}|
-            PRINTROVE_VARIANT_MAP=${{ secrets.PRINTROVE_VARIANT_MAP }}|
-            BASIC_AUTH_USER=${{ secrets.BASIC_AUTH_USER }}|
-            BASIC_AUTH_PASSWORD=${{ secrets.BASIC_AUTH_PASSWORD }}
-          env_vars_separator: "|"
+          env_vars: "NODE_ENV=production@@@GCS_BUCKET=${{ secrets.GCS_BUCKET }}@@@DATABASE_URL=${{ secrets.DATABASE_URL }}@@@GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}@@@PRINTIFY_API_TOKEN=${{ secrets.PRINTIFY_API_TOKEN }}@@@PRINTIFY_SHOP_ID=${{ secrets.PRINTIFY_SHOP_ID }}@@@PRINT_PROVIDER=${{ secrets.PRINT_PROVIDER }}@@@PRINTROVE_EMAIL=${{ secrets.PRINTROVE_EMAIL }}@@@PRINTROVE_PASSWORD=${{ secrets.PRINTROVE_PASSWORD }}@@@PRINTROVE_PRODUCT_ID=${{ secrets.PRINTROVE_PRODUCT_ID }}@@@PRINTROVE_PRODUCT_SUBTYPE_ID=${{ secrets.PRINTROVE_PRODUCT_SUBTYPE_ID }}@@@PRINTROVE_VARIANT_MAP=${{ secrets.PRINTROVE_VARIANT_MAP }}@@@BASIC_AUTH_USER=${{ secrets.BASIC_AUTH_USER }}@@@BASIC_AUTH_PASSWORD=${{ secrets.BASIC_AUTH_PASSWORD }}"
+          env_vars_separator: "@@@"
 
       - name: Deploy to Firebase Hosting
         run: |
