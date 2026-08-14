@@ -9,9 +9,8 @@ const storage = GCS_BUCKET ? new Storage() : null;
 //
 //   • Local dev (default): ./public/generated — served straight off the public
 //     folder, easy to inspect on disk.
-//   • Railway / any host with an ephemeral filesystem: set STORAGE_DIR to a
-//     mounted **Volume** path (e.g. /data) so artwork survives redeploys and
-//     restarts. Files there are served by the /generated/[...path] route
+//   • Ephemeral filesystem (e.g. Cloud Run): set STORAGE_DIR to a
+//     mounted volume path or use Google Cloud Storage (detected via GCS_BUCKET).
 //     handler instead of the static public folder.
 //
 // Either way the public URL stays /generated/<batchId>/<file>.

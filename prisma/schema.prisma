@@ -40,7 +40,7 @@ model Design {
   productImagePath String // styled product mockup shown in the grid
   designImagePath  String // clean, print-ready art sent to Printify
   // Base64 copy of the print-ready design — used as fallback when the file is
-  // missing (e.g. after a Railway redeploy wipes the ephemeral filesystem).
+  // missing (e.g. after a redeploy wipes the ephemeral filesystem on some hosts).
   designImageData  String? @db.Text
   // For SVG-based designs, the original vector source.
   designSVGData    String? @db.Text

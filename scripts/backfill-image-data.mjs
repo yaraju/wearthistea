@@ -1,8 +1,8 @@
 /**
  * Backfill designImageData for designs whose file still exists on disk.
  *
- * Run on Railway (where STORAGE_DIR and DATABASE_URL are set):
- *   railway run node scripts/backfill-image-data.mjs
+ * Run where STORAGE_DIR and DATABASE_URL are set:
+ *   node scripts/backfill-image-data.mjs
  *
  * Safe to run multiple times — skips designs that already have the field set.
  */

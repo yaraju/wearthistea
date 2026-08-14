@@ -8,7 +8,7 @@ import type { NextRequest } from "next/server";
 // credentials with every page, API call, and image request automatically. This
 // stops strangers who find the URL from spending your Gemini / Printify budget.
 //
-// Leave the vars unset for open local dev. On Railway, set both to turn it on.
+// Leave the vars unset for open local dev. Set both in production to turn it on.
 //
 // Note: this is a lightweight gate, not a full auth system. If you later want a
 // public marketing page, swap this for a cookie-based unlock on the paid routes.
@@ -40,7 +40,7 @@ export function proxy(request: NextRequest) {
 
 export const config = {
   // Gate everything except: Next internals, the favicon, the health check
-  // (Railway pings /api/health and it must never be blocked), and the legal
+  // (liveness probes to /api/health must never be blocked), and the legal
   // pages (policies should stay publicly reachable for compliance / payment
   // processors even when the rest of the site is behind the gate).
   matcher: [
