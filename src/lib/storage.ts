@@ -16,7 +16,7 @@ const storage = GCS_BUCKET ? new Storage() : null;
 //
 // Either way the public URL stays /generated/<batchId>/<file>.
 export const STORAGE_DIR =
-  process.env.STORAGE_DIR ?? path.join(process.cwd(), "public", "generated");
+  process.env.STORAGE_DIR ?? path.join(/*turbopackIgnore: true*/ process.cwd(), "public", "generated");
 
 const URL_PREFIX = "/generated";
 

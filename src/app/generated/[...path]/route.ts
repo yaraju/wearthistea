@@ -13,7 +13,7 @@ export async function GET(
 
   try {
     const { data, contentType } = await getFile(relPath);
-    return new Response(data, {
+    return new Response(data as BodyInit, {
       headers: {
         "Content-Type": contentType,
         "Cache-Control": "public, max-age=31536000, immutable",
