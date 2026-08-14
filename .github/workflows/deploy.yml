@@ -77,4 +77,5 @@ jobs:
             BASIC_AUTH_PASSWORD=${{ secrets.BASIC_AUTH_PASSWORD }}
 
       - name: Deploy to Firebase Hosting
-        run: npx firebase-tools deploy --only hosting --project ${{ env.PROJECT_ID }}
+        run: |
+          npx firebase-tools deploy --only hosting:${{ env.PROJECT_ID }} --project ${{ env.PROJECT_ID }} --non-interactive

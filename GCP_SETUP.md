@@ -8,6 +8,9 @@ Enable the following APIs in your GCP Console:
 - Artifact Registry API
 - Cloud Storage API
 - Firebase Hosting API
+- IAM Service Account Credentials API (iamcredentials.googleapis.com)
+
+> **Note:** Ensure you have initialized Firebase in your project by visiting the [Firebase Console](https://console.firebase.google.com/), selecting your project, and clicking on "Hosting" to create the first site. The site ID should match your Project ID for the default deployment configuration.
 
 ## 2. Artifact Registry
 Create a repository for your Docker images:
@@ -39,7 +42,7 @@ gcloud iam service-accounts create github-actions-deploy \
     --display-name="GitHub Actions Deploy"
 
 # Add required roles
-for ROLE in run.admin storage.admin artifactregistry.admin iam.serviceAccountUser firebasehosting.admin cloudconfig.viewer; do
+for ROLE in run.admin storage.admin artifactregistry.admin iam.serviceAccountUser firebasehosting.admin cloudconfig.viewer iam.serviceAccountTokenCreator resourcemanager.projectViewer; do
   gcloud projects add-iam-policy-binding <PROJECT_ID> \
       --member="serviceAccount:github-actions-deploy@<PROJECT_ID>.iam.gserviceaccount.com" \
       --role="roles/$ROLE"
@@ -71,11 +74,11 @@ gcloud iam workload-identity-pools providers create-oidc "github-provider" \
     --issuer-uri="https://token.actions.githubusercontent.com"
 
 # Allow GitHub to impersonate the Service Account
-# Replace <GITHUB_REPO> with your repository (e.g., username/repo)
+# Replace <OWNER/REPO> with your repository (e.g., username/repo)
 gcloud iam service-accounts add-iam-policy-binding "github-actions-deploy@<PROJECT_ID>.iam.gserviceaccount.com" \
     --project="<PROJECT_ID>" \
     --role="roles/iam.workloadIdentityUser" \
-    --member="principalSet://iam.googleapis.com/${WORKLOAD_POOL_ID}/attribute.repository/<GITHUB_REPO>"
+    --member="principalSet://iam.googleapis.com/${WORKLOAD_POOL_ID}/attribute.repository/<OWNER/REPO>"
 ```
 
 ### 4.4 Get Provider ID for GitHub Secrets
