@@ -145,9 +145,9 @@ Generated artwork is written to `public/generated/<batchId>/` (git-ignored).
 
 The app is configured for serverless deployment on Google Cloud. It uses Cloud Run for compute, Google Cloud Storage for persistent artwork, and Firebase Hosting as a global CDN.
 
-1. **Setup GCP Infrastructure.** Follow the instructions in [GCP_SETUP.md](./GCP_SETUP.md) to create the bucket, Artifact Registry, and Service Account.
+1. **Setup GCP Infrastructure.** Follow the instructions in [GCP_SETUP.md](./GCP_SETUP.md) to create the bucket, Artifact Registry, and Workload Identity Federation.
 
-2. **Configure GitHub Secrets.** Add the required secrets (GCP_SA_KEY, DATABASE_URL, etc.) to your GitHub repository.
+2. **Configure GitHub Secrets.** Add the required secrets (`GCP_WIF_PROVIDER`, `GCP_SA_EMAIL`, `DATABASE_URL`, etc.) to your GitHub repository.
 
 3. **Deploy.** Push to the `main` branch to trigger the GitHub Action defined in `.github/workflows/deploy.yml`.
 

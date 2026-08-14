@@ -25,39 +25,74 @@ Create a bucket for your design artwork:
 gsutil mb -l us-central1 gs://wearthistea-designs-<PROJECT_ID>
 ```
 
-## 4. Service Account & Permissions -> Avy needs to continue from here
-Create a Service Account for GitHub Actions:
+## 4. Workload Identity Federation (WIF)
+We use WIF instead of JSON keys for secure authentication from GitHub Actions.
+
+### 4.1 Enable Required API
 ```bash
-gcloud iam service-accounts create github-actions-deploy
-
-# Add required roles
-gcloud projects add-iam-policy-binding <PROJECT_ID> \
-    --member="serviceAccount:github-actions-deploy@<PROJECT_ID>.iam.gserviceaccount.com" \
-    --role="roles/run.admin"
-
-gcloud projects add-iam-policy-binding <PROJECT_ID> \
-    --member="serviceAccount:github-actions-deploy@<PROJECT_ID>.iam.gserviceaccount.com" \
-    --role="roles/storage.admin"
-
-gcloud projects add-iam-policy-binding <PROJECT_ID> \
-    --member="serviceAccount:github-actions-deploy@<PROJECT_ID>.iam.gserviceaccount.com" \
-    --role="roles/artifactregistry.admin"
-
-gcloud projects add-iam-policy-binding <PROJECT_ID> \
-    --member="serviceAccount:github-actions-deploy@<PROJECT_ID>.iam.gserviceaccount.com" \
-    --role="roles/iam.serviceAccountUser"
-
-gcloud projects add-iam-policy-binding <PROJECT_ID> \
-    --member="serviceAccount:github-actions-deploy@<PROJECT_ID>.iam.gserviceaccount.com" \
-    --role="roles/firebasehosting.admin"
+gcloud services enable iamcredentials.googleapis.com --project="<PROJECT_ID>"
 ```
 
-Generate a JSON key for the Service Account and add it to GitHub Secrets as `GCP_SA_KEY`.
+### 4.2 Create Service Account
+```bash
+gcloud iam service-accounts create github-actions-deploy \
+    --display-name="GitHub Actions Deploy"
+
+# Add required roles
+for ROLE in run.admin storage.admin artifactregistry.admin iam.serviceAccountUser firebasehosting.admin cloudconfig.viewer; do
+  gcloud projects add-iam-policy-binding <PROJECT_ID> \
+      --member="serviceAccount:github-actions-deploy@<PROJECT_ID>.iam.gserviceaccount.com" \
+      --role="roles/$ROLE"
+done
+```
+
+### 4.3 Setup WIF Pool and Provider
+```bash
+# Create Workload Identity Pool
+gcloud iam workload-identity-pools create "github-pool" \
+    --project="<PROJECT_ID>" \
+    --location="global" \
+    --display-name="GitHub Actions Pool"
+
+# Get the Pool ID
+export WORKLOAD_POOL_ID=$(gcloud iam workload-identity-pools describe "github-pool" \
+    --project="<PROJECT_ID>" \
+    --location="global" \
+    --format="value(name)")
+
+# Create Workload Identity Provider. <OWNER/REPO> should be something like yaraju/wearthistea
+gcloud iam workload-identity-pools providers create-oidc "github-provider" \
+    --project="<PROJECT_ID>" \
+    --location="global" \
+    --workload-identity-pool="github-pool" \
+    --display-name="GitHub Actions Provider" \
+    --attribute-mapping="google.subject=assertion.sub,attribute.actor=assertion.actor,attribute.repository=assertion.repository" \
+    --attribute-condition="assertion.repository=='<OWNER/REPO>'" \
+    --issuer-uri="https://token.actions.githubusercontent.com"
+
+# Allow GitHub to impersonate the Service Account
+# Replace <GITHUB_REPO> with your repository (e.g., username/repo)
+gcloud iam service-accounts add-iam-policy-binding "github-actions-deploy@<PROJECT_ID>.iam.gserviceaccount.com" \
+    --project="<PROJECT_ID>" \
+    --role="roles/iam.workloadIdentityUser" \
+    --member="principalSet://iam.googleapis.com/${WORKLOAD_POOL_ID}/attribute.repository/<GITHUB_REPO>"
+```
+
+### 4.4 Get Provider ID for GitHub Secrets
+Run this to get the value for `GCP_WIF_PROVIDER`:
+```bash
+gcloud iam workload-identity-pools providers describe "github-provider" \
+    --project="<PROJECT_ID>" \
+    --location="global" \
+    --workload-identity-pool="github-pool" \
+    --format="value(name)"
+```
 
 ## 5. GitHub Secrets
 Add the following secrets to your GitHub repository:
 - `GCP_PROJECT_ID`: Your Google Cloud Project ID.
-- `GCP_SA_KEY`: The JSON key for the `github-actions-deploy` service account.
+- `GCP_WIF_PROVIDER`: The full name of the WIF provider (from step 4.4).
+- `GCP_SA_EMAIL`: `github-actions-deploy@<PROJECT_ID>.iam.gserviceaccount.com`
 - `GCS_BUCKET`: The name of the bucket you created (e.g., `wearthistea-designs-<PROJECT_ID>`).
 - `DATABASE_URL`: Your Neon Postgres connection string.
 - `GEMINI_API_KEY`: Your Google AI Studio API key.
