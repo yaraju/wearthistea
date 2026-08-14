@@ -12,7 +12,8 @@
         "source": "**",
         "run": {
           "serviceId": "wearthistea",
-          "region": "us-central1"
+          "region": "us-central1",
+          "projectId": "wearthistea"
         }
       }
     ]
