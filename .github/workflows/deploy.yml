@@ -1,3 +1,4 @@
+# Deploy to Google Cloud and Firebase Hosting
 name: Deploy to Google Cloud
 
 on:
