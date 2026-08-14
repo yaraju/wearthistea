@@ -1,4 +1,6 @@
-# wearthistea ☕
+# wearthistea ☕ 
+
+A streetwear design studio powered by Gemini and Print-on-Demand.
 
 **Gossip you can wear.** Type a piece of internet drama → AI brews 5 original
 t-shirt design options → you approve one → it's pushed live to Printify.
