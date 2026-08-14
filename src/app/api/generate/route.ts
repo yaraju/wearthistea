@@ -19,6 +19,7 @@ const Body = z.object({
   style: z.enum(["raster", "svg"]).optional().default("raster"),
 });
 
+// Health check and main generation logic
 export async function POST(req: Request) {
   let body;
   try {
