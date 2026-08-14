@@ -43,6 +43,14 @@ jobs:
         run: |
           gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
 
+      - name: Prepare Env Vars
+        id: prep
+        shell: bash
+        run: |
+          # Clean variant map: remove newlines and optional surrounding quotes
+          CLEAN_MAP=$(echo "${{ secrets.PRINTROVE_VARIANT_MAP }}" | tr -d '\n\r' | sed "s/^'//;s/'$//;s/^\"//;s/\"$//")
+          echo "variant_map=$CLEAN_MAP" >> $GITHUB_OUTPUT
+
       - name: Build and Push Container
         run: |-
           docker build -t "${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE_NAME }}:${{ github.sha }}" .
@@ -73,7 +81,7 @@ jobs:
             PRINTROVE_PASSWORD=${{ secrets.PRINTROVE_PASSWORD }}
             PRINTROVE_PRODUCT_ID=${{ secrets.PRINTROVE_PRODUCT_ID }}
             PRINTROVE_PRODUCT_SUBTYPE_ID=${{ secrets.PRINTROVE_PRODUCT_SUBTYPE_ID }}
-            PRINTROVE_VARIANT_MAP=${{ secrets.PRINTROVE_VARIANT_MAP }}
+            PRINTROVE_VARIANT_MAP=${{ steps.prep.outputs.variant_map }}
             BASIC_AUTH_USER=${{ secrets.BASIC_AUTH_USER }}
             BASIC_AUTH_PASSWORD=${{ secrets.BASIC_AUTH_PASSWORD }}
           env_vars_update_strategy: overwrite
