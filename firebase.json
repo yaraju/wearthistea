@@ -1,6 +1,6 @@
 {
   "hosting": {
-    "site": "wearthistea-12b39",
+    "site": "wearthistea",
     "public": "public",
     "ignore": [
       "firebase.json",
@@ -12,8 +12,7 @@
         "source": "**",
         "run": {
           "serviceId": "wearthistea",
-          "region": "us-central1",
-          "projectId": "wearthistea"
+          "region": "us-central1"
         }
       }
     ]

@@ -7,7 +7,6 @@ on:
 
 env:
   PROJECT_ID: wearthistea
-  FIREBASE_PROJECT_ID: wearthistea-12b39
   REGION: us-central1
   SERVICE_NAME: wearthistea
   REPOSITORY: wearthistea
@@ -79,4 +78,4 @@ jobs:
 
       - name: Deploy to Firebase Hosting
         run: |
-          npx --yes firebase-tools deploy --only hosting --project ${{ env.FIREBASE_PROJECT_ID }} --non-interactive
+          npx --yes firebase-tools deploy --only hosting --project ${{ env.PROJECT_ID }} --non-interactive
