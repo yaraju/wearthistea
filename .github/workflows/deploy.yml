@@ -79,8 +79,4 @@ jobs:
 
       - name: Deploy to Firebase Hosting
         run: |
-          gcloud services enable cloudresourcemanager.googleapis.com --project ${{ env.PROJECT_ID }}
-          gcloud services enable firebasehosting.googleapis.com --project ${{ env.PROJECT_ID }}
-          # Create the site if it doesn't exist
-          npx --yes firebase-tools@latest hosting:sites:create wearthistea --project ${{ env.PROJECT_ID }} || true
-          npx --yes firebase-tools@latest deploy --only hosting --project ${{ env.PROJECT_ID }} --non-interactive
+          npx --yes firebase-tools deploy --only hosting --project ${{ env.PROJECT_ID }} --non-interactive
