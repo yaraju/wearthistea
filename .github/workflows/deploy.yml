@@ -79,4 +79,9 @@ jobs:
       - name: Deploy to Firebase Hosting
         run: |
           npx --yes firebase-tools hosting:sites:list --project ${{ env.PROJECT_ID }}
-          npx --yes firebase-tools deploy --only hosting --site ${{ env.PROJECT_ID }} --project ${{ env.PROJECT_ID }} --non-interactive
+          # Create the site if it doesn't exist
+          npx --yes firebase-tools hosting:sites:create ${{ env.PROJECT_ID }} --project ${{ env.PROJECT_ID }} || true
+          # Inject site ID into firebase.json to avoid ambiguity
+          # Using python for JSON manipulation as it's guaranteed to be available
+          python3 -c "import json; d = json.load(open('firebase.json')); d['hosting']['site'] = '${{ env.PROJECT_ID }}'; json.dump(d, open('firebase.json', 'w'), indent=2)"
+          npx --yes firebase-tools deploy --only hosting --project ${{ env.PROJECT_ID }} --non-interactive
