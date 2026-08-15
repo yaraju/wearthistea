@@ -9,7 +9,7 @@ import { compositeOnTee } from "./mockup";
 
 /**
  * Stage 2: Realize a design into high-resolution print-ready output.
- * For Raster: Imagen 4 Fast + Local Background Removal.
+ * For Raster: High-Res Nano Banana Pro + Local Background Removal.
  * For SVG: Sharp high-res rasterization.
  */
 export async function realizeDesign(designId: string) {
@@ -63,7 +63,7 @@ export async function realizeDesign(designId: string) {
 
       const fullPrompt = `${spatialPrompt}${prompts.designImage(concept)}`;
       
-      // Generate with Imagen 4 Fast
+      // Generate with Nano Banana Pro
       const rawImageB64 = await generateImage(fullPrompt, settings.gemini.imagenFastModel);
       
       // Local Background Removal for transparent alpha channel
@@ -99,7 +99,7 @@ export async function realizeDesign(designId: string) {
         designImageData: finalDesignB64,
         status: finalStatus,
         designPrompt: isRaster 
-          ? `Stage 2: Realized (Imagen 4 Fast + Local BG Removal)` 
+          ? `Stage 2: Realized (Nano Banana Pro + Local BG Removal)` 
           : `Stage 2: Realized (SVG High-Res)`,
       },
     });

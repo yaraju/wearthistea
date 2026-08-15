@@ -51,20 +51,19 @@ export const settings = {
 
   gemini: {
     /** Near-instant text/SVG model for Stage 1. */
-    flashLiteModel: process.env.GEMINI_FLASH_LITE_MODEL ?? "gemini-2.5-flash-lite",
+    flashLiteModel: process.env.GEMINI_FLASH_LITE_MODEL ?? "gemini-3.5-flash-lite",
     /** Text model that writes the design concepts (titles, phrases, visual ideas). */
-    textModel: process.env.GEMINI_TEXT_MODEL ?? "gemini-2.5-flash",
+    textModel: process.env.GEMINI_TEXT_MODEL ?? "gemini-3.7-flash",
     /**
      * High-quality fast image model for Stage 2 realization.
+     * Verified: gemini-3-pro-image (Nano Banana Pro) has excellent typography.
      */
-    imagenFastModel: process.env.GEMINI_IMAGEN_FAST_MODEL ?? "imagen-4.0-fast-generate-001",
+    imagenFastModel: process.env.GEMINI_IMAGEN_FAST_MODEL ?? "gemini-3-pro-image",
     /**
      * Image model that renders the artwork + product shots.
-     * "Nano Banana" family => gemini-2.5-flash-image (default).
-     * You can also point this at an Imagen model (e.g. imagen-3.0-generate-002);
-     * the code auto-detects "imagen" in the name and uses the Images API instead.
+     * Verified: gemini-3.1-flash-image (Nano Banana 2) is the current stable fast choice.
      */
-    imageModel: process.env.GEMINI_IMAGE_MODEL ?? "gemini-2.5-flash-image",
+    imageModel: process.env.GEMINI_IMAGE_MODEL ?? "gemini-3.1-flash-image",
     /** Creativity for concept text. Higher = wilder. */
     textTemperature: num(process.env.GEMINI_TEXT_TEMPERATURE, 1.05),
   },
