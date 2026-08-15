@@ -46,29 +46,19 @@ jobs:
       - name: Prepare Env Vars
         id: prep
         shell: bash
+        env:
+          VARIANT_MAP: ${{ secrets.PRINTROVE_VARIANT_MAP }}
+          AUTH_USER: ${{ secrets.BASIC_AUTH_USER }}
+          AUTH_PASS: ${{ secrets.BASIC_AUTH_PASSWORD }}
         run: |
           # Clean variables: remove newlines and optional surrounding quotes
           clean_var() {
             tr -d '\n\r' | sed "s/^ *//;s/ *$//;s/^'//;s/'$//;s/^\"//;s/\"$//;"
           }
           
-          echo -n "variant_map=" >> $GITHUB_OUTPUT
-          cat <<'EOF' | clean_var >> $GITHUB_OUTPUT
-          ${{ secrets.PRINTROVE_VARIANT_MAP }}
-          EOF
-          echo "" >> $GITHUB_OUTPUT
-
-          echo -n "auth_user=" >> $GITHUB_OUTPUT
-          cat <<'EOF' | clean_var >> $GITHUB_OUTPUT
-          ${{ secrets.BASIC_AUTH_USER }}
-          EOF
-          echo "" >> $GITHUB_OUTPUT
-
-          echo -n "auth_pass=" >> $GITHUB_OUTPUT
-          cat <<'EOF' | clean_var >> $GITHUB_OUTPUT
-          ${{ secrets.BASIC_AUTH_PASSWORD }}
-          EOF
-          echo "" >> $GITHUB_OUTPUT
+          echo "variant_map=$(echo "$VARIANT_MAP" | clean_var)" >> $GITHUB_OUTPUT
+          echo "auth_user=$(echo "$AUTH_USER" | clean_var)" >> $GITHUB_OUTPUT
+          echo "auth_pass=$(echo "$AUTH_PASS" | clean_var)" >> $GITHUB_OUTPUT
 
       - name: Build and Push Container
         run: |-
