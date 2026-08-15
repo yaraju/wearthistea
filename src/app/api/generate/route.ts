@@ -53,8 +53,12 @@ export async function POST(req: Request) {
     // Step 1: Unified Batched Call (Concepts + SVG Previews)
     const batchItems = await generateBatch(keyword, count, style, trace);
     
-    const dbSpan = trace.span({ name: "db-operations" });
-    const batch = await prisma.batch.create({ data: { keyword } });
+    const batchSpan = trace.span({ name: "create-batch-row" });
+    const batch = await prisma.batch.create({ data: { keyword } }).catch((err) => {
+      batchSpan.end({ level: "ERROR", statusMessage: String(err) });
+      throw err;
+    });
+    batchSpan.end({ output: batch.id });
 
     // Step 2: Process batch items in parallel (Storage + Database)
     const designPromises = batchItems.map(async (item, i) => {
@@ -74,20 +78,43 @@ export async function POST(req: Request) {
       if (!item.error && designB64) {
         try {
           // Save the initial SVG preview as the design file
-          designImagePath = await saveImage(batch.id, `${base}-preview.png`, designB64);
+          const saveDesignSpan = trace.span({ name: "save-design-image" });
+          try {
+            designImagePath = await saveImage(batch.id, `${base}-preview.png`, designB64);
+            saveDesignSpan.end({ output: designImagePath });
+          } catch (err) {
+            saveDesignSpan.end({ level: "ERROR", statusMessage: String(err) });
+            throw err;
+          }
 
           // Create the mockup preview (Free/Local)
           if (settings.images.generateProductShot) {
             try {
-              const productB64 = await compositeOnTee(
-                designB64,
-                c.color || settings.printify.defaultColor
-              );
-              productImagePath = await saveImage(
-                batch.id,
-                `${base}-product.png`,
-                productB64
-              );
+              const compositeSpan = trace.span({ name: "composite-product-image" });
+              let productB64;
+              try {
+                productB64 = await compositeOnTee(
+                  designB64,
+                  c.color || settings.printify.defaultColor
+                );
+                compositeSpan.end();
+              } catch (err) {
+                compositeSpan.end({ level: "ERROR", statusMessage: String(err) });
+                throw err;
+              }
+
+              const saveProductSpan = trace.span({ name: "save-product-image" });
+              try {
+                productImagePath = await saveImage(
+                  batch.id,
+                  `${base}-product.png`,
+                  productB64
+                );
+                saveProductSpan.end({ output: productImagePath });
+              } catch (err) {
+                saveProductSpan.end({ level: "ERROR", statusMessage: String(err) });
+                throw err;
+              }
             } catch {
               // Mockup is optional, fallback to design file
             }
@@ -98,7 +125,8 @@ export async function POST(req: Request) {
         }
       }
 
-      return await prisma.design.create({
+      const createDesignSpan = trace.span({ name: "create-design-row" });
+      const design = await prisma.design.create({
         data: {
           batchId: batch.id,
           title: c.title,
@@ -117,11 +145,15 @@ export async function POST(req: Request) {
           status,
           errorMessage,
         },
+      }).catch((err) => {
+        createDesignSpan.end({ level: "ERROR", statusMessage: String(err) });
+        throw err;
       });
+      createDesignSpan.end({ output: design.id });
+      return design;
     });
 
     const designs = await Promise.all(designPromises);
-    dbSpan.end({ output: `${designs.length} designs created` });
 
     trace.update({
       output: { batchId: batch.id, designCount: designs.length },
