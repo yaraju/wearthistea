@@ -7,6 +7,8 @@ import { saveImage } from "@/lib/storage";
 import { getProvider } from "@/lib/print-provider";
 import { settings } from "@/config/settings";
 import { prompts } from "@/config/prompts";
+import { langfuse, getTraceId } from "@/lib/langfuse";
+import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -33,15 +35,25 @@ export async function POST(req: Request) {
 
   const { keyword, category, productType, color, style } = body;
 
+  const traceId = getTraceId(req);
+  const trace = langfuse.trace({
+    name: "generate-api",
+    id: traceId,
+    input: body,
+  });
+
+  logger.info(`[Stage 1] Starting generation for keyword: "${keyword}"`, {
+    traceId,
+    keyword,
+    style,
+  });
+
   try {
     const count = settings.optionsPerKeyword;
     // Step 1: Unified Batched Call (Concepts + SVG Previews)
-    const start = Date.now();
-    const batchItems = await generateBatch(keyword, count, style);
-    const duration = Date.now() - start;
+    const batchItems = await generateBatch(keyword, count, style, trace);
     
-    console.log(`[Stage 1] Generated ${count} concepts for "${keyword}" in ${duration}ms`);
-
+    const dbSpan = trace.span({ name: "db-operations" });
     const batch = await prisma.batch.create({ data: { keyword } });
 
     // Step 2: Process batch items in parallel (Storage + Database)
@@ -109,6 +121,17 @@ export async function POST(req: Request) {
     });
 
     const designs = await Promise.all(designPromises);
+    dbSpan.end({ output: `${designs.length} designs created` });
+
+    trace.update({
+      output: { batchId: batch.id, designCount: designs.length },
+    });
+
+    logger.info(`[Stage 1] Successfully generated ${designs.length} designs`, {
+      traceId,
+      batchId: batch.id,
+      count: designs.length,
+    });
 
     return NextResponse.json({
       batchId: batch.id,
@@ -118,6 +141,14 @@ export async function POST(req: Request) {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Generation failed.";
+    trace.update({
+      tags: ["error"],
+      output: { error: message },
+    });
+    logger.error(`[Stage 1] Generation failed: ${message}`, {
+      traceId,
+      error: err,
+    });
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

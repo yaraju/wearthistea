@@ -6,20 +6,34 @@ import { saveImage } from "./storage";
 import { removeBgB64 } from "./background-removal";
 import { svgToPng } from "./svg-utils";
 import { compositeOnTee } from "./mockup";
+import { langfuse } from "./langfuse";
 
 /**
  * Stage 2: Realize a design into high-resolution print-ready output.
  * For Raster: High-Res Nano Banana Pro + Local Background Removal.
  * For SVG: Sharp high-res rasterization.
  */
-export async function realizeDesign(designId: string) {
+export async function realizeDesign(designId: string, parent?: any) {
+  const observation = (parent || langfuse).span({
+    name: "realizeDesign",
+    input: { designId },
+  });
+
   const design = await prisma.design.findUnique({
     where: { id: designId },
   });
 
-  if (!design) throw new Error("Design not found.");
+  if (!design) {
+    const error = new Error("Design not found.");
+    observation.end({ level: "error", statusMessage: error.message });
+    throw error;
+  }
+  
   // If already realized, just return it.
-  if (design.status === "generated") return design;
+  if (design.status === "generated") {
+    observation.end({ output: "already-generated" });
+    return design;
+  }
 
   const isRaster = design.designPrompt.toLowerCase().includes("raster");
   
@@ -33,6 +47,11 @@ export async function realizeDesign(designId: string) {
       
       // Spatial Mapping: Describe the layout of the SVG wireframe to guide Imagen
       if (design.designSVGData) {
+        const spatialObservation = observation.generation({
+          name: "spatial-mapping",
+          model: settings.gemini.flashLiteModel,
+          input: design.designSVGData,
+        });
         try {
           const layoutRes = await ai().models.generateContent({
             model: settings.gemini.flashLiteModel,
@@ -44,10 +63,12 @@ export async function realizeDesign(designId: string) {
             ],
           });
           const layoutDesc = layoutRes.text;
+          spatialObservation.end({ output: layoutDesc });
           if (layoutDesc) {
             spatialPrompt = `Follow this layout precisely: ${layoutDesc.trim()}. `;
           }
         } catch (e) {
+          spatialObservation.end({ level: "error", statusMessage: String(e) });
           console.warn("Spatial mapping failed, proceeding with standard prompt.", e);
         }
       }
@@ -64,16 +85,21 @@ export async function realizeDesign(designId: string) {
       const fullPrompt = `${spatialPrompt}${prompts.designImage(concept)}`;
       
       // Generate with Nano Banana Pro
-      const rawImageB64 = await generateImage(fullPrompt, settings.gemini.imagenFastModel);
+      finalDesignB64 = await generateImage(fullPrompt, settings.gemini.imagenFastModel, observation);
       
+      const bgObservation = observation.span({ name: "removeBackground" });
       // Local Background Removal for transparent alpha channel
-      finalDesignB64 = await removeBgB64(rawImageB64);
+      finalDesignB64 = await removeBgB64(finalDesignB64);
+      bgObservation.end({ output: "success" });
     } else {
       // Stage 2 (SVG): High-res rasterization of existing vector data
       if (!design.designSVGData) throw new Error("SVG data missing for realization.");
+      const svgObservation = observation.span({ name: "svgToPng-highres" });
       finalDesignB64 = await svgToPng(design.designSVGData);
+      svgObservation.end({ output: "success" });
     }
 
+    const storageObservation = observation.span({ name: "saveImages" });
     // Save final high-res image (replaces the preview path)
     const designImagePath = await saveImage(design.batchId, `${design.id}-final.png`, finalDesignB64);
     
@@ -90,8 +116,9 @@ export async function realizeDesign(designId: string) {
         console.error("Mockup update failed during realization:", err);
       }
     }
+    storageObservation.end({ output: "success" });
 
-    return await prisma.design.update({
+    const updated = await prisma.design.update({
       where: { id: designId },
       data: {
         designImagePath,
@@ -104,8 +131,12 @@ export async function realizeDesign(designId: string) {
       },
     });
 
+    observation.end({ output: "success" });
+    return updated;
+
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
+    observation.end({ level: "error", statusMessage: errorMessage });
     return await prisma.design.update({
       where: { id: designId },
       data: {

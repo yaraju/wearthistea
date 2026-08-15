@@ -103,6 +103,9 @@ jobs:
             PRINTROVE_VARIANT_MAP=${{ steps.prep.outputs.variant_map }}
             BASIC_AUTH_USER=${{ steps.prep.outputs.auth_user }}
             BASIC_AUTH_PASSWORD=${{ steps.prep.outputs.auth_pass }}
+            NEXT_PUBLIC_LANGFUSE_PUBLIC_KEY=${{ secrets.NEXT_PUBLIC_LANGFUSE_PUBLIC_KEY }}
+            LANGFUSE_SECRET_KEY=${{ secrets.LANGFUSE_SECRET_KEY }}
+            LANGFUSE_BASEURL=${{ secrets.LANGFUSE_BASEURL }}
           env_vars_update_strategy: overwrite
 
       - name: Deploy to Firebase Hosting
