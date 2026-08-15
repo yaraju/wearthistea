@@ -183,22 +183,22 @@ export default function KeywordStudio() {
             </div>
 
             <div className="flex flex-col gap-2">
-              <label className="px-4 font-mono text-xs font-bold uppercase tracking-wider text-ink-soft">
+              <label htmlFor="color-select" className="px-4 font-mono text-xs font-bold uppercase tracking-wider text-ink-soft">
                 Color
               </label>
-              <div className="mx-2 flex flex-wrap gap-2 px-2 py-1">
+              <select
+                id="color-select"
+                name="color-select"
+                className="mx-2 rounded-xl bg-paper-1 px-4 py-3 font-mono text-sm text-ink focus:outline-none"
+                value={selectedColor}
+                onChange={(e) => setSelectedColor(e.target.value)}
+              >
                 {selectedProduct?.colors.map((color: string) => (
-                  <button
-                    key={color}
-                    onClick={() => setSelectedColor(color)}
-                    title={color}
-                    className={`h-8 w-8 rounded-full border-2 transition-all ${
-                      selectedColor === color ? "border-pink scale-110 shadow-md" : "border-transparent opacity-70 hover:opacity-100"
-                    }`}
-                    style={{ backgroundColor: getColorCode(color) }}
-                  />
+                  <option key={color} value={color}>
+                    {color}
+                  </option>
                 ))}
-              </div>
+              </select>
             </div>
 
             <div className="flex flex-col gap-2">
