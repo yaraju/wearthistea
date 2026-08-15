@@ -151,15 +151,15 @@ export default function KeywordStudio() {
       {/* Input card */}
       <div className="sticker sticker-pink rounded-2xl bg-paper-2 p-2 sm:p-3">
         <div className="flex flex-col gap-3">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-            <div className="flex flex-1 flex-col gap-2">
-              <label htmlFor="product-select" className="px-4 font-mono text-xs font-bold uppercase tracking-wider text-ink-soft">
+          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+            <div className="flex min-w-0 flex-1 flex-col gap-2">
+              <label htmlFor="product-select" className="px-2 font-mono text-xs font-bold uppercase tracking-wider text-ink-soft">
                 Product & Style
               </label>
               <select
                 id="product-select"
                 name="product-select"
-                className="mx-2 rounded-xl bg-paper-1 px-4 py-3 font-mono text-sm text-ink focus:outline-none"
+                className="w-full rounded-xl bg-paper-1 px-4 py-3 font-mono text-sm text-ink focus:outline-none"
                 value={selectedProduct?.id || ""}
                 onChange={(e) => {
                   const prodId = parseInt(e.target.value);
@@ -182,14 +182,14 @@ export default function KeywordStudio() {
               </select>
             </div>
 
-            <div className="flex flex-col gap-2">
-              <label htmlFor="color-select" className="px-4 font-mono text-xs font-bold uppercase tracking-wider text-ink-soft">
+            <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-initial">
+              <label htmlFor="color-select" className="px-2 font-mono text-xs font-bold uppercase tracking-wider text-ink-soft">
                 Color
               </label>
               <select
                 id="color-select"
                 name="color-select"
-                className="mx-2 rounded-xl bg-paper-1 px-4 py-3 font-mono text-sm text-ink focus:outline-none"
+                className="w-full rounded-xl bg-paper-1 px-4 py-3 font-mono text-sm text-ink focus:outline-none"
                 value={selectedColor}
                 onChange={(e) => setSelectedColor(e.target.value)}
               >
@@ -201,13 +201,13 @@ export default function KeywordStudio() {
               </select>
             </div>
 
-            <div className="flex flex-col gap-2">
-              <label htmlFor="style-select" className="px-4 font-mono text-xs font-bold uppercase tracking-wider text-ink-soft">
+            <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-initial">
+              <label htmlFor="style-select" className="px-2 font-mono text-xs font-bold uppercase tracking-wider text-ink-soft">
                 Art Style
               </label>
               <select
                 id="style-select"
-                className="mx-2 rounded-xl bg-paper-1 px-4 py-3 font-mono text-sm text-ink focus:outline-none"
+                className="w-full rounded-xl bg-paper-1 px-4 py-3 font-mono text-sm text-ink focus:outline-none"
                 value={style}
                 onChange={(e) => setStyle(e.target.value as "raster" | "svg")}
               >
@@ -238,7 +238,7 @@ export default function KeywordStudio() {
               autoComplete="off"
               enterKeyHint="go"
               aria-describedby="tea-hint"
-              className="tea-input bg-transparent px-4 py-4 font-mono text-base text-ink placeholder:text-ink-soft/70 focus:outline-none sm:text-lg"
+              className="tea-input w-full flex-1 bg-transparent px-4 py-4 font-mono text-base text-ink placeholder:text-ink-soft/70 focus:outline-none sm:text-lg"
             />
             <button
               onClick={() => spill()}
