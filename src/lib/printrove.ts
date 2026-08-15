@@ -313,22 +313,42 @@ export async function getStockCount(params: {
   
   const results = data.data ?? [];
   return results.map((item) => {
-    // Extract color from product_variants if it's not directly on the item
+    // Extract color and size from product_variants if they're not directly on the item
     let color = item.color;
-    if (!color && item.product_variants) {
-        const colorAttr = item.product_variants.find((v: { product_attribute_id: number; value: string; name?: string }) => v.product_attribute_id === 2 || v.name?.toLowerCase().includes("color"));
-        color = colorAttr?.value;
+    let size = item.size;
+
+    if (item.product_variants) {
+      if (!color) {
+        const colorAttr = item.product_variants.find(
+          (v: any) =>
+            v.product_attribute_id === 2 || 
+            (v.name && v.name.toLowerCase().includes("color")) ||
+            (v.attribute_name && v.attribute_name.toLowerCase().includes("color"))
+        );
+        color = colorAttr?.value || colorAttr?.name;
+      }
+      if (!size) {
+        const sizeAttr = item.product_variants.find(
+          (v: any) =>
+            v.product_attribute_id === 1 || 
+            (v.name && v.name.toLowerCase().includes("size")) ||
+            (v.attribute_name && v.attribute_name.toLowerCase().includes("size"))
+        );
+        size = sizeAttr?.value || sizeAttr?.name;
+      }
     }
 
     return {
       id: item.id,
-      product_id: item.parent_id || item.product_id, // stock items often refer to parent_id as the base product
+      // Printrove stock items often use parent_id for the base product.
+      // If missing, product_id might be the base or the variant.
+      product_id: item.parent_id || item.product_id,
       variant_id: item.id,
       quantity: item.stock ?? item.quantity ?? 0,
-      availability: item.is_instock ? "in_stock" : "out_of_stock",
+      availability: (item.stock ?? item.quantity ?? 0) > 0 ? "in_stock" : "out_of_stock",
       category_id: item.category_id,
       color: color || "Unknown",
-      size: item.size || item.product_variants?.find((v: { product_attribute_id: number; value: string }) => v.product_attribute_id === 1)?.value || "Unknown",
+      size: size || "Unknown",
     };
   });
 }

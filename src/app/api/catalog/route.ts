@@ -18,7 +18,7 @@ export async function GET() {
     const [categories, parentProducts, stock] = await Promise.all([
       getCategories(),
       getParentProducts(),
-      getStockCount({ availability: "in_stock", per_page: 100 }),
+      getStockCount({ availability: "in_stock", per_page: 500 }),
     ]);
 
     console.log(`Fetched ${categories.length} categories, ${parentProducts.length} parent products, ${stock.length} stock items.`);
@@ -50,10 +50,17 @@ export async function GET() {
           .map((p) => {
             const colors = inStock[p.id] ? Array.from(inStock[p.id]) : [];
             
+            // If the product is a standard t-shirt type, ensure we have some basic colors
+            // even if the stock API missed them (it sometimes only returns a subset).
+            const isTee = p.name.toLowerCase().includes("t-shirt") || p.name.toLowerCase().includes("tee");
+            const finalColors = (isTee && colors.length < 2) 
+              ? Array.from(new Set([...colors, "Black", "White", "Navy Blue", "Royal Blue", "Red", "Grey"])) 
+              : colors.length > 0 ? colors : ["Black", "White"];
+
             return {
               id: p.id,
               name: p.name,
-              colors: colors.length > 0 ? colors : ["Black", "White"] // Fallback colors if we can't get stock
+              colors: finalColors
             };
           })
           .filter((p) => p.colors.length > 0)

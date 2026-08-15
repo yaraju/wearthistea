@@ -4,6 +4,7 @@ import { useState, useEffect, type ChangeEvent, type FormEvent } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { Sparkles, Loader2, Check, AlertTriangle, ArrowRight, RotateCcw } from "lucide-react";
 import type { DesignDTO, GenerateResponse, VariantOptionsDTO, CatalogResponse, CatalogProduct, CatalogCategory } from "@/lib/types";
+import { getColorCode } from "@/lib/colors";
 
 const SKELETON_COUNT = 5; // matches default settings.optionsPerKeyword
 
@@ -194,9 +195,7 @@ export default function KeywordStudio() {
                     className={`h-8 w-8 rounded-full border-2 transition-all ${
                       selectedColor === color ? "border-pink scale-110 shadow-md" : "border-transparent opacity-70 hover:opacity-100"
                     }`}
-                    style={{ 
-                      backgroundColor: color.toLowerCase() === "white" ? "#FFFFFF" : color.toLowerCase() === "black" ? "#000000" : color.toLowerCase() 
-                    }}
+                    style={{ backgroundColor: getColorCode(color) }}
                   />
                 ))}
               </div>
@@ -339,6 +338,7 @@ export default function KeywordStudio() {
                     reduce={reduce}
                     options={result.options}
                     onRetry={retryDesign}
+                    selectedColor={selectedColor}
                   />
                 ))}
               </div>
@@ -392,12 +392,14 @@ function DesignCard({
   reduce,
   options,
   onRetry,
+  selectedColor,
 }: {
   design: DesignDTO;
   index: number;
   reduce: boolean | null;
   options: VariantOptionsDTO;
   onRetry?: (id: string) => void;
+  selectedColor: string;
 }) {
   const [status, setStatus] = useState(design.status);
   const [busy, setBusy] = useState(false);
@@ -408,7 +410,7 @@ function DesignCard({
 
   const [form, setForm] = useState({
     size: options.sizes[0] ?? "",
-    color: options.colors[0] ?? "",
+    color: selectedColor || (options.colors[0] ?? ""),
     quantity: "1",
     name: "",
     email: "",
@@ -420,6 +422,13 @@ function DesignCard({
     pincode: "",
     country: options.countries[0] ?? "",
   });
+
+  // Sync color when user selects a different color in the studio
+  useEffect(() => {
+    if (selectedColor && options.colors.includes(selectedColor)) {
+      setForm(f => ({ ...f, color: selectedColor }));
+    }
+  }, [selectedColor, options.colors]);
 
   const set =
     (k: keyof typeof form) =>
@@ -483,7 +492,10 @@ function DesignCard({
         queued ? "sticker-tea" : ""
       }`}
     >
-      <div className="relative flex aspect-[4/5] items-center justify-center overflow-hidden alpha-grid p-5">
+      <div 
+        className="relative flex aspect-[4/5] items-center justify-center overflow-hidden p-5"
+        style={{ backgroundColor: getColorCode(selectedColor) }}
+      >
         {img ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
