@@ -71,7 +71,9 @@ CONCEPT RULES:
 const SVG_RULES = `
 SVG RULES:
 - Clean, minimalist streetwear line art.
-- Use only valid SVG elements (<path>, <circle>, <rect>, <g>, <text>).
+- Use only valid SVG elements (<path>, <circle>, <rect>, <g>).
+- DO NOT USE <text> tags. Any text or phrases must be converted to <path> data.
+- Text-as-paths ensures perfect rendering regardless of system fonts.
 - No external links, images, or CSS <style> blocks (use inline attributes).
 - Optimized for chest print: centered in a 500x600 viewBox.
 - Single color (high contrast to garment) or very limited punchy palette.
