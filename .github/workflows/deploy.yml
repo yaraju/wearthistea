@@ -84,7 +84,7 @@ jobs:
           image: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
           flags: |
             --allow-unauthenticated
-            --memory=512Mi
+            --memory=1024Mi
             --cpu=1
             --min-instances=0
             --max-instances=10
