@@ -11,6 +11,40 @@ const SKELETON_COUNT = 5; // matches default settings.optionsPerKeyword
 
 type Phase = "idle" | "loading" | "done" | "error";
 
+/** Parse a fetch Response as JSON, surfacing a clear error for a non-JSON
+ * response (e.g. an HTML 502 from an upstream gateway) instead of letting
+ * `res.json()` throw its raw "Unexpected token '<'" parse error. */
+async function parseJsonResponse(res: Response): Promise<any> {
+  const contentType = res.headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) {
+    throw new Error(
+      res.ok
+        ? "Unexpected response from the server."
+        : `Server error (${res.status}). Please try again in a moment.`
+    );
+  }
+  return res.json();
+}
+
+/** Run `worker` over `items`, at most `concurrency` at a time. Used to spread
+ * per-design render requests out instead of firing them all at once — they
+ * all land on the same backend container, and full concurrency pushes each
+ * request's latency close to the hosting proxy's timeout (see spill()). */
+async function runWithConcurrency<T>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<void>
+): Promise<void> {
+  let next = 0;
+  async function run(): Promise<void> {
+    const i = next++;
+    if (i >= items.length) return;
+    await worker(items[i]);
+    return run();
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, run));
+}
+
 /** Translate raw API errors into a one-line human reason. */
 function friendlyError(msg: string): string {
   if (/limit:\s*0|RESOURCE_EXHAUSTED|free_tier|quota|\b429\b/i.test(msg)) {
@@ -90,10 +124,24 @@ export default function KeywordStudio() {
           style
         }),
       });
-      const data = await res.json();
+      const data = await parseJsonResponse(res);
       if (!res.ok) throw new Error(data.error ?? "Something went wrong.");
       setResult(data as GenerateResponse);
       setPhase("done");
+      // Concepts come back fast; each design's artwork is rendered by its own
+      // request so no single request has to finish the whole batch inside
+      // the hosting proxy's timeout. Each card flips from "generating" to
+      // done/failed independently as its request completes. Capped at 2
+      // in-flight renders — 5 at once all land on the same Cloud Run
+      // container (concurrency isn't scaled per-request) and contend hard
+      // enough for CPU that individual renders stretch from ~30s to ~55-58s,
+      // eating almost all of the ~60s proxy budget. See the production
+      // incident note in design-quality-improvement-plan.md.
+      runWithConcurrency(
+        (data as GenerateResponse).designs.map((d) => d.id),
+        2,
+        retryDesign
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Generation failed.");
       setPhase("error");
@@ -101,8 +149,6 @@ export default function KeywordStudio() {
   }
 
   async function retryDesign(designId: string) {
-    if (!result) return;
-    
     setResult(prev => {
       if (!prev) return null;
       return {
@@ -119,7 +165,7 @@ export default function KeywordStudio() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ designId }),
       });
-      const data = await res.json();
+      const data = await parseJsonResponse(res);
       if (!res.ok) throw new Error(data.error ?? "Retry failed.");
       
       const updatedDesign = data.design as DesignDTO;
@@ -468,7 +514,7 @@ function DesignCard({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const data = await res.json();
+      const data = await parseJsonResponse(res);
       if (!res.ok) throw new Error(data.error ?? "Could not place this order.");
       setStatus("pending");
       setOpen(false);
@@ -505,6 +551,10 @@ function DesignCard({
             decoding="async"
             className="max-h-full max-w-full object-contain"
           />
+        ) : generating ? (
+          <div className="flex h-full items-center justify-center p-6 text-center">
+            <Loader2 className="h-5 w-5 animate-spin text-ink-soft" aria-hidden />
+          </div>
         ) : (
           <div className="flex h-full items-center justify-center p-6 text-center">
             <span className="font-mono text-xs text-ink-soft">

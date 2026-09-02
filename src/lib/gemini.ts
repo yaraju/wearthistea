@@ -69,29 +69,59 @@ const DUMMY_CONCEPTS: Concept[] = [
   },
 ];
 
+export interface GenerateBatchOptions {
+  style?: "raster" | "svg";
+  category?: string;
+  productType?: string;
+  color?: string;
+}
+
 /**
- * Ask the text model for N original t-shirt concepts for a keyword.
- * Returns validated Concept objects.
+ * Stage 1a only: fast structured concept writing (text only — no
+ * illustration, typically a couple of seconds). Split out from generateBatch
+ * so a caller can return concepts to the client immediately and realize each
+ * concept's artwork as its own separate request afterward — a single request
+ * that writes concepts AND renders 5 images synchronously can run 40-70s+,
+ * which exceeds Firebase Hosting's unconfigurable ~60s rewrite-proxy timeout
+ * (see design-quality-improvement-plan.md's production-incident note).
  */
 export async function generateConcepts(
   keyword: string,
-  count: number
+  count: number,
+  options: GenerateBatchOptions = {},
+  parent?: any
 ): Promise<Concept[]> {
+  const { style = "raster", category, productType, color } = options;
+
   if (!hasApiKey()) {
     // No Gemini key — return shuffled dummy concepts so the UI workflow completes.
     return DUMMY_CONCEPTS.slice(0, count).map((c) => ({
       ...c,
+      artStyle: style,
+      category,
+      productType,
+      color,
       blurb: `[DEMO] ${c.blurb ?? ""}`.trim(),
     }));
   }
 
+  const generationObservation = (parent || langfuse).generation({
+    name: "gemini-batch-concepts",
+    model: settings.gemini.flashLiteModel,
+    modelParameters: {
+      temperature: settings.gemini.textTemperature,
+      responseMimeType: "application/json",
+    },
+    input: prompts.batchUser(keyword, count),
+  });
+
   const res = await ai().models.generateContent({
-    model: settings.gemini.textModel,
+    model: settings.gemini.flashLiteModel,
     contents: [
-      { role: "user", parts: [{ text: prompts.conceptUser(keyword, count) }] },
+      { role: "user", parts: [{ text: prompts.batchUser(keyword, count) }] },
     ],
     config: {
-      systemInstruction: prompts.conceptSystem,
+      systemInstruction: prompts.batchSystem,
       temperature: settings.gemini.textTemperature,
       responseMimeType: "application/json",
       responseSchema: prompts.conceptSchema as unknown as Record<string, unknown>,
@@ -99,20 +129,24 @@ export async function generateConcepts(
   });
 
   const text = res.text;
-  if (!text) throw new Error("Concept model returned no text.");
+  generationObservation.end({ output: text });
+  if (!text) throw new Error("Batch model returned no text.");
 
   let parsed: { concepts?: Concept[] };
   try {
     parsed = JSON.parse(text);
   } catch {
-    throw new Error(`Concept model returned non-JSON: ${text.slice(0, 200)}…`);
+    throw new Error(`Batch model returned non-JSON: ${text.slice(0, 200)}…`);
   }
 
   const concepts = (parsed.concepts ?? []).filter(
     (c): c is Concept => Boolean(c?.title && c?.phrase && c?.visualConcept)
   );
   if (concepts.length === 0) throw new Error("No valid concepts were produced.");
-  return concepts.slice(0, count);
+
+  return concepts
+    .slice(0, count)
+    .map((c) => ({ ...c, artStyle: style, category, productType, color }));
 }
 
 export interface BatchItem extends Concept {
@@ -205,23 +239,15 @@ export async function renderConceptArt(
  * fully realized here; there is no separate "preview vs realized" quality
  * gap for the caller to bridge later.
  */
-export interface GenerateBatchOptions {
-  style?: "raster" | "svg";
-  category?: string;
-  productType?: string;
-  color?: string;
-}
-
 export async function generateBatch(
   keyword: string,
   count: number,
   options: GenerateBatchOptions = {},
   parent?: any
 ): Promise<BatchItem[]> {
-  const { style = "raster", category, productType, color } = options;
   const observation = (parent || langfuse).span({
     name: "generateBatch",
-    input: { keyword, count, style, category, productType, color },
+    input: { keyword, count, ...options },
     metadata: {
       conceptModel: settings.gemini.flashLiteModel,
       imageModel: settings.gemini.imagenFastModel,
@@ -229,71 +255,27 @@ export async function generateBatch(
   });
 
   if (!hasApiKey()) {
-    // No Gemini key — return shuffled dummy concepts so the UI workflow completes.
-    const results = DUMMY_CONCEPTS.slice(0, count).map((c) => ({
-      ...c,
-      imageB64: DUMMY_PNG_B64,
-      blurb: `[DEMO] ${c.blurb ?? ""}`.trim(),
-    }));
+    const concepts = await generateConcepts(keyword, count, options, observation);
+    const results = concepts.map((c) => ({ ...c, imageB64: DUMMY_PNG_B64 }));
     observation.end({ output: results });
     return results;
   }
 
   try {
-    // Stage 1a: fast structured concept writing (text only — no illustration).
-    const generationObservation = observation.generation({
-      name: "gemini-batch-concepts",
-      model: settings.gemini.flashLiteModel,
-      modelParameters: {
-        temperature: settings.gemini.textTemperature,
-        responseMimeType: "application/json",
-      },
-      input: prompts.batchUser(keyword, count),
-    });
+    const concepts = await generateConcepts(keyword, count, options, observation);
 
-    const res = await ai().models.generateContent({
-      model: settings.gemini.flashLiteModel,
-      contents: [
-        { role: "user", parts: [{ text: prompts.batchUser(keyword, count) }] },
-      ],
-      config: {
-        systemInstruction: prompts.batchSystem,
-        temperature: settings.gemini.textTemperature,
-        responseMimeType: "application/json",
-        responseSchema: prompts.conceptSchema as unknown as Record<string, unknown>,
-      },
-    });
-
-    const text = res.text;
-    generationObservation.end({ output: text });
-
-    if (!text) throw new Error("Batch model returned no text.");
-
-    let parsed: { concepts?: Concept[] };
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      throw new Error(`Batch model returned non-JSON: ${text.slice(0, 200)}…`);
-    }
-
-    const concepts = (parsed.concepts ?? []).filter(
-      (c): c is Concept => Boolean(c?.title && c?.phrase && c?.visualConcept)
-    );
-    if (concepts.length === 0) throw new Error("No valid concepts were produced.");
-
-    // Stage 1b: real artwork per concept, in parallel. One concept failing
-    // (quota, model refusal, etc.) doesn't take down the rest of the batch —
-    // it just comes back with `error` set.
+    // Real artwork per concept, in parallel. One concept failing (quota,
+    // model refusal, etc.) doesn't take down the rest of the batch — it just
+    // comes back with `error` set.
     const limitBgRemoval = createLimiter(2);
     const items: BatchItem[] = await Promise.all(
       concepts.map(async (c) => {
-        const withStyle: Concept = { ...c, artStyle: style, category, productType, color };
         try {
-          const imageB64 = await renderConceptArt(withStyle, observation, limitBgRemoval);
-          return { ...withStyle, imageB64 };
+          const imageB64 = await renderConceptArt(c, observation, limitBgRemoval);
+          return { ...c, imageB64 };
         } catch (err) {
           const error = err instanceof Error ? err.message : String(err);
-          return { ...withStyle, imageB64: "", error };
+          return { ...c, imageB64: "", error };
         }
       })
     );

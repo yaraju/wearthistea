@@ -50,7 +50,8 @@ model Design {
   // For SVG-based designs, the original vector source.
   designSVGData    String? @db.Text
 
-  // Lifecycle: generated -> pending (queued for approval) -> approved -> published | rejected | failed
+  // Lifecycle: generating (concept written, artwork rendering) -> generated ->
+  // pending (queued for approval) -> approved -> published | rejected | failed
   status   String  @default("generated")
   selected Boolean @default(false)
 

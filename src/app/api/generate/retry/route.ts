@@ -83,6 +83,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ design: updated });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Retry failed.";
+    // Best-effort: this route is now also the initial-render path (not just
+    // manual retries), so a design left at "generating" forever after a
+    // failure would look stuck rather than failed on a page reload.
+    await prisma.design
+      .update({ where: { id: designId }, data: { status: "failed", errorMessage: message } })
+      .catch(() => {});
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

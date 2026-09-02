@@ -391,3 +391,75 @@ text-band pixels read the exact ink color `isDarkGarment()` picked
 (`#111111` on a White-garment request, `#ffffff` on Black). Raster style
 re-tested after the shared-code refactor and produces the same quality as
 Phase 1, unaffected.
+
+## 9. Production incident: Firebase Hosting's ~60s proxy timeout (2026-09-02)
+
+**Symptom.** Immediately after the Phase 0-3 deploy, generating designs in
+production failed with "The kettle broke. Unexpected token '<', "<!DOCTYPE
+"... is not valid JSON" — the frontend's `res.json()` choking on an HTML
+error page instead of the expected JSON response.
+
+**Root cause.** Phase 1 replaced Stage 1's old sub-second SVG-preview step
+with real per-concept image generation, so `/api/generate` now does 5
+parallel `renderConceptArt` calls (image-model generation + local background
+removal) synchronously inside one HTTP request. A batch call through the
+direct Cloud Run URL (bypassing Firebase Hosting) measured **69.6s, HTTP
+200** — Cloud Run itself has no problem with this. The same request through
+`wearthistea.web.app` (Firebase Hosting's `run` rewrite) came back **502 at
+exactly 60.03s**, Google Frontend's generic error page. Firebase Hosting's
+rewrite-to-Cloud-Run proxy imposes its own ~60s timeout, independent of and
+shorter than Cloud Run's own timeout (unset here, defaults to 300s) and the
+route's own `export const maxDuration = 300`. This ceiling isn't
+configurable via `firebase.json`. Before Phase 1, Stage 1 was sub-second, so
+this ceiling was never reachable; the new architecture made it the binding
+constraint on every generation.
+
+**Fix.** Split `/api/generate` into two stages across two round trips instead
+of one:
+- `/api/generate` now runs only `generateConcepts` (text-only, a few seconds)
+  and writes `Design` rows with `status: "generating"` and no artwork,
+  returning immediately.
+- The client (`KeywordStudio.tsx`'s `spill()`) then issues one
+  `/api/generate/retry` call per design — the same route and code path
+  already used for manual re-rolls — each of which runs one
+  `renderConceptArt` and updates that design's row independently. Each
+  card flips from a spinner to its finished art (or a retry button, on
+  failure) as its own request completes, which also reads as nicer
+  progressive-reveal UX than the old all-or-nothing wait.
+
+**The concurrency hazard (caught before deploy, not after).** Firing all 5
+per-design requests at once seemed sufficient — a single uncontended render
+measured 31.3s against prod, comfortable margin. But 5 requests land on the
+*same* Cloud Run container (Cloud Run doesn't scale out per-request; default
+per-instance concurrency is 80, and `--min-instances=0` means there's
+usually only one warm instance). Measured against prod: 5 concurrent
+`/api/generate/retry` calls came back in 40.6s, 40.9s, 56.7s, 57.0s, 58.1s —
+all still 200s, but three of them within 2-3s of the 60s wall, i.e. thin
+enough margin that ordinary variance (a slower model response, GC pause,
+Cloud Run deciding not to cold-start a second instance in time) would
+reintroduce the same 502. Fix: cap client-side concurrency at 2 in-flight
+renders (`runWithConcurrency` in `KeywordStudio.tsx`) rather than queuing on
+the server, since a server-side queue would burn a queued request's own
+60s budget while it waits. Re-verified against prod with the concurrency-2
+pattern: 29.9s, 32.8s, 41.8s, 41.8s, 42.8s — 17-30s of margin, matching the
+uncontended single-request baseline much more closely.
+
+**Known remaining gap, not fixed here.** `/api/designs/select` still calls
+`realizeDesign()` synchronously when a buyer changes color at order time —
+a full single-design re-render inside that request, same >60s risk, same
+502 shape, if it ever lands on a contended container. The order form is
+hidden while a design is `generating`, so this incident's path is closed,
+but a color change at checkout is a latent version of the same failure
+mode and should get the same two-stage treatment if it's ever reported.
+
+**Verification.** `npx tsc --noEmit` clean. Local dev server:
+`/api/generate` returned in 10.5s (vs. 40-70s before) with 5 designs at
+`status: "generating"`; 5 parallel `/api/generate/retry` calls against those
+IDs completed in 31-35s each. Production, direct measurement (not
+inference): single retry 31.3s; 5 concurrent 40.6-58.1s (thin margin,
+motivated the client-side cap); 5 at concurrency-2 29.9-42.8s (restored
+margin). No UI smoke test was run in a real browser before deploy given the
+urgency of the outage — the per-design-render state machine
+(`generating`/`failed`/done) is pre-existing UI (previously only reachable
+via manual retry), not new code, and was verified via direct API calls
+producing the same response shapes that state machine already consumes.

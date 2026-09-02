@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { generateBatch } from "@/lib/gemini";
-import { compositeOnTee } from "@/lib/mockup";
-import { saveImage } from "@/lib/storage";
+import { generateConcepts } from "@/lib/gemini";
 import { getProvider } from "@/lib/print-provider";
 import { settings } from "@/config/settings";
 import { prompts } from "@/config/prompts";
@@ -50,14 +48,22 @@ export async function POST(req: Request) {
 
   try {
     const count = settings.optionsPerKeyword;
-    // Step 1: concepts + real print-ready artwork, generated in parallel.
-    const batchItems = await generateBatch(
+    const resolvedColor = color || settings.printify.defaultColor;
+
+    // Stage 1a only: fast concept writing (a couple of seconds). Artwork for
+    // each concept is rendered by a separate request per design (fired by the
+    // client right after this responds) rather than synchronously here —
+    // rendering all N images in one request can take 40-70s+, which exceeds
+    // Firebase Hosting's unconfigurable ~60s rewrite-proxy timeout and comes
+    // back as an HTML 502 the client can't parse as JSON. See the production
+    // incident note in design-quality-improvement-plan.md.
+    const concepts = await generateConcepts(
       keyword,
       count,
-      { style, category, productType, color: color || settings.printify.defaultColor },
+      { style, category, productType, color: resolvedColor },
       trace
     );
-    
+
     const batchSpan = trace.span({ name: "create-batch-row" });
     const batch = await prisma.batch.create({ data: { keyword } }).catch((err) => {
       batchSpan.end({ level: "ERROR", statusMessage: String(err) });
@@ -65,107 +71,38 @@ export async function POST(req: Request) {
     });
     batchSpan.end({ output: batch.id });
 
-    // Step 2: Process batch items in parallel (Storage + Database)
-    const designPromises = batchItems.map(async (item, i) => {
-      const c = {
-        ...item,
-        category,
-        productType,
-        color: color || settings.printify.defaultColor,
-      };
-      const base = `${i + 1}-${Date.now()}`;
-      let designImagePath = "";
-      let productImagePath = "";
-      const designB64 = item.imageB64 || "";
-      let status = item.error ? "failed" : "generated";
-      let errorMessage: string | null = item.error || null;
-
-      if (!item.error && designB64) {
-        try {
-          // Save the print-ready design image
-          const saveDesignSpan = trace.span({ name: "save-design-image" });
-          try {
-            designImagePath = await saveImage(batch.id, `${base}-design.png`, designB64);
-            saveDesignSpan.end({ output: designImagePath });
-          } catch (err) {
-            saveDesignSpan.end({ level: "ERROR", statusMessage: String(err) });
-            throw err;
-          }
-
-          // Create the mockup preview (Free/Local)
-          if (settings.images.generateProductShot) {
-            try {
-              const compositeSpan = trace.span({ name: "composite-product-image" });
-              let productB64;
-              try {
-                productB64 = await compositeOnTee(
-                  designB64,
-                  c.color || settings.printify.defaultColor
-                );
-                compositeSpan.end();
-              } catch (err) {
-                compositeSpan.end({ level: "ERROR", statusMessage: String(err) });
-                throw err;
-              }
-
-              const saveProductSpan = trace.span({ name: "save-product-image" });
-              try {
-                productImagePath = await saveImage(
-                  batch.id,
-                  `${base}-product.png`,
-                  productB64
-                );
-                saveProductSpan.end({ output: productImagePath });
-              } catch (err) {
-                saveProductSpan.end({ level: "ERROR", statusMessage: String(err) });
-                throw err;
-              }
-            } catch {
-              // Mockup is optional, fallback to design file
-            }
-          }
-        } catch (err) {
-          status = "failed";
-          errorMessage = err instanceof Error ? err.message : String(err);
-        }
-      }
-
-      const createDesignSpan = trace.span({ name: "create-design-row" });
-      const design = await prisma.design.create({
-        data: {
-          batchId: batch.id,
-          title: c.title,
-          phrase: c.phrase,
-          visualConcept: c.visualConcept,
-          vibe: c.vibe ?? null,
-          blurb: c.blurb ?? null,
-          style,
-          designPrompt: prompts.designImage(c),
-          productPrompt: `[mockup composite of clean design on ${
-            c.color || settings.printify.defaultColor
-          } tee]`,
-          designImagePath,
-          productImagePath,
-          designImageData: designImagePath ? designB64 : null,
-          variantColor: c.color || settings.printify.defaultColor,
-          status,
-          errorMessage,
-        },
-      }).catch((err) => {
-        createDesignSpan.end({ level: "ERROR", statusMessage: String(err) });
-        throw err;
-      });
-      createDesignSpan.end({ output: design.id });
-      return design;
+    const createDesignSpan = trace.span({ name: "create-design-rows" });
+    const designs = await Promise.all(
+      concepts.map((c) =>
+        prisma.design.create({
+          data: {
+            batchId: batch.id,
+            title: c.title,
+            phrase: c.phrase,
+            visualConcept: c.visualConcept,
+            vibe: c.vibe ?? null,
+            blurb: c.blurb ?? null,
+            style,
+            designPrompt: prompts.designImage(c),
+            productPrompt: `[mockup composite of clean design on ${resolvedColor} tee]`,
+            designImagePath: "",
+            productImagePath: "",
+            variantColor: resolvedColor,
+            status: "generating",
+          },
+        })
+      )
+    ).catch((err) => {
+      createDesignSpan.end({ level: "ERROR", statusMessage: String(err) });
+      throw err;
     });
-
-    const designs = await Promise.all(designPromises);
+    createDesignSpan.end({ output: designs.map((d) => d.id) });
 
     trace.update({
       output: { batchId: batch.id, designCount: designs.length },
     });
 
-    logger.info(`[Stage 1] Successfully generated ${designs.length} designs`, {
+    logger.info(`[Stage 1] Wrote ${designs.length} concepts, artwork pending`, {
       traceId,
       batchId: batch.id,
       count: designs.length,
