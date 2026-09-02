@@ -226,3 +226,86 @@ for: (a) a cache hit under the Phase 4 architecture, or (b) a pure-typography de
 rendered via Satori with no illustration component. Set the near-term latency target
 at "~15–20s with good progressive feedback," not "<4s," and treat true <4s as a Phase‑4
 outcome for repeat/similar keywords, not a Phase‑1 one.
+
+## 8. Implementation log (Phases 0–2)
+
+**Phase 0 — shipped.** `Design.style` ("raster" | "svg") replaces the three
+places that inferred pipeline mode from `designPrompt` substring matching.
+
+**Phase 1 — shipped.** Stage 1 (`generateBatch`) now renders every concept's
+final art directly via the image model instead of hand-authored SVG; every
+design comes back `"generated"` or `"failed"`, never a separate low-fidelity
+preview. Verified against a live key: alpha channel present, correct
+light/dark ink for both a dark and a light garment color, legible on-concept
+art for the exact "mercury is in microwave" case from the original
+screenshot.
+
+Two real bugs surfaced during that verification, both fixed:
+- `background-removal.ts` was handing `@imgly/background-removal-node` a raw
+  base64 string (read as a URL/path — `ENAMETOOLONG` on a large string) or an
+  untyped Buffer (wrapped in a `Blob` with no `type`, so its format sniffer
+  rejected it as "Unsupported format"). Fixed by decoding to bytes, sniffing
+  the real format with `sharp`, and passing an explicitly MIME-typed `Blob`.
+- The project's `sharp` (`^0.35`) and `@imgly/background-removal-node`'s
+  bundled `sharp` (`~0.32.4`) each load their own native libvips binding.
+  Running both in one process **segfaults the whole server** the first time
+  background removal actually executes — this had never been hit before
+  because Stage 2 realization, the only prior caller, was apparently never
+  exercised end-to-end locally. Fixed with a `package.json` `overrides` pin
+  so only one `sharp` is installed tree-wide.
+- Separately, `realizeDesign()` catches its own errors internally and
+  returns a `status: "failed"` row rather than throwing. `select/route.ts`
+  awaited it without checking the returned status, so a real-colored realize
+  failure (quota, refusal, network) still fell through to the unconditional
+  `status: "pending"` update — the buyer would see "sent to the drop queue"
+  over a stale/wrong-color print file. Fixed by checking `realized.status`
+  before proceeding.
+
+Measured cost/latency tradeoff: ~40–45s locally for a 5-option batch (5
+parallel image-model calls + concurrency-limited local background removal),
+not the ~15–20s estimated in §7 above — that estimate undercounted local
+background-removal cost. Deploy target is Cloud Run at `--memory=1024Mi
+--cpu=1`; that's tight for 5 concurrent image payloads plus two concurrent
+ONNX background-removal sessions, so the deploy config was bumped to 2Gi
+alongside this rollout.
+
+**Phase 2 — shipped as a manual harness, not a request-time gate.**
+`scripts/eval-designs.ts` generates real designs for a fixed keyword set and
+grades each with `prompts.imageReview()` (already written, never wired up
+before this). A baseline run (n=16: 8 keywords × 2 designs, raster style)
+found:
+
+- **Garment-in-graphic rate: 1/16 (6%).** This was the open question raised
+  mid-Phase-1 — do "graphic only, no t-shirt" print files actually contain a
+  drawn t-shirt often enough to need a generation-time QA-and-regenerate gate
+  on every request? At 6% on this sample, no: that's a real, occasional
+  model miss, not a systemic failure. Adding a synchronous regeneration loop
+  to every one of the now-5-real-image-calls-per-search would add cost and
+  latency to fix a one-in-sixteen case. Left as a known residual risk;
+  revisit with a larger sample if it turns out to be worse in production
+  than this batch suggests.
+- **The dominant reported issue, "background is not transparent," is
+  largely a false-positive artifact of vision-based review, not a real
+  defect.** Cross-checked against `sharp`'s actual `hasAlpha` reading on the
+  same bytes the reviewer saw: the review flagged this on a large majority
+  of samples, but every one of those images already had a real alpha
+  channel. A vision model is shown a flattened/composited view of the image
+  and has no way to perceive an alpha channel — it's judging whatever solid
+  color the transparent pixels got composited against, not transparency
+  itself. `imageReview`'s transparency check should be treated as
+  unreliable; transparency is already correctly verified programmatically
+  (`sharp` `hasAlpha`) in the real pipeline and in this harness.
+- **After discounting that one check, genuine recurring defects are:**
+  occasional phrase duplication, occasional misspelling, extra unrequested
+  text beyond the exact phrase, and style/palette drift (multi-color output
+  when a single/limited-ink style was requested). These show the image
+  model isn't perfect at exact-text instruction-following — but this is a
+  different order of problem than the original hand-drawn-SVG pipeline,
+  which produced *no* legible on-shirt text at all. None of these are
+  blocking; they're the kind of thing the existing per-card retry button
+  already handles when a buyer notices one.
+
+Kept as a manual/periodic tool in `scripts/`, not wired into `/api/generate`
+— consistent with the original plan (§4.3) and with the measured garment
+rate not being high enough to justify the added latency/cost of a
+synchronous regeneration gate on every request.

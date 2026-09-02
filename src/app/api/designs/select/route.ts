@@ -72,7 +72,16 @@ export async function POST(req: Request) {
           variantColor: body.color,
         }
       });
-      await realizeDesign(body.designId);
+      // realizeDesign() catches its own errors and returns a status:"failed"
+      // row rather than throwing — it never reaches the catch block below on
+      // its own, so the failure has to be read from its return value.
+      const realized = await realizeDesign(body.designId);
+      if (realized.status === "failed") {
+        return NextResponse.json(
+          { error: realized.errorMessage || "Could not finalize the high-res design. Please try again." },
+          { status: 500 }
+        );
+      }
     } catch (err) {
       console.error("[Realize] Failed during selection:", err);
       return NextResponse.json(
