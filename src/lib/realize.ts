@@ -1,9 +1,8 @@
 import { prisma } from "./prisma";
-import { generateImage } from "./gemini";
+import { renderConceptArt } from "./gemini";
 import { settings } from "@/config/settings";
 import { prompts, type Concept } from "@/config/prompts";
 import { saveImage } from "./storage";
-import { removeBgB64 } from "./background-removal";
 import { svgToPng } from "./svg-utils";
 import { compositeOnTee } from "./mockup";
 import { langfuse } from "./langfuse";
@@ -61,15 +60,11 @@ export async function realizeDesign(designId: string, parent?: any) {
         artStyle: design.style === "svg" ? "svg" : "raster",
       };
 
-      fullPrompt = prompts.designImage(concept);
+      // Kept for the designPrompt debug/replay field below — renderConceptArt
+      // recomputes this itself from `concept` rather than taking it as input.
+      fullPrompt = concept.artStyle === "svg" ? prompts.designImageArtOnly(concept) : prompts.designImage(concept);
 
-      // Generate with Nano Banana Pro
-      finalDesignB64 = await generateImage(fullPrompt, settings.gemini.imagenFastModel, observation);
-      
-      const bgObservation = observation.span({ name: "removeBackground" });
-      // Local Background Removal for transparent alpha channel
-      finalDesignB64 = await removeBgB64(finalDesignB64);
-      bgObservation.end({ output: "success" });
+      finalDesignB64 = await renderConceptArt(concept, observation);
     } else {
       // Legacy: high-res rasterization of previously stored vector data.
       const svgObservation = observation.span({ name: "svgToPng-highres" });

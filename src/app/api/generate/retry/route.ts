@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { generateImage } from "@/lib/gemini";
+import { renderConceptArt } from "@/lib/gemini";
+import type { Concept } from "@/config/prompts";
 import { compositeOnTee } from "@/lib/mockup";
 import { saveImage } from "@/lib/storage";
-import { removeBgB64 } from "@/lib/background-removal";
 import { settings } from "@/config/settings";
 
 export const runtime = "nodejs";
@@ -33,15 +33,21 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Design not found." }, { status: 404 });
     }
 
-    // designPrompt is the exact prompt used to render this design's art —
-    // replaying it is how a retry reproduces the same concept.
-    let designB64 = await generateImage(design.designPrompt);
-    try {
-      designB64 = await removeBgB64(designB64);
-    } catch {
-      // Best-effort — fall back to the model's raw (already prompted for
-      // transparency) output rather than failing the retry over this step.
-    }
+    // Rebuild the concept from the stored fields (title/phrase/visual/style)
+    // and re-render through the same path generateBatch uses — not a bare
+    // replay of designPrompt, which for "svg"-style designs is only the
+    // illustration half; a retry needs to redo the Satori text compositing
+    // too, not just regenerate the art-only layer.
+    const concept: Concept = {
+      title: design.title,
+      phrase: design.phrase,
+      visualConcept: design.visualConcept,
+      vibe: design.vibe ?? undefined,
+      blurb: design.blurb ?? undefined,
+      color: design.variantColor || settings.printify.defaultColor,
+      artStyle: design.style === "svg" ? "svg" : "raster",
+    };
+    const designB64 = await renderConceptArt(concept);
 
     const base = `${design.id}-${Date.now()}`;
     const designImagePath = await saveImage(design.batchId, `${base}-design.png`, designB64);

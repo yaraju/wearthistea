@@ -309,3 +309,85 @@ Kept as a manual/periodic tool in `scripts/`, not wired into `/api/generate`
 — consistent with the original plan (§4.3) and with the measured garment
 rate not being high enough to justify the added latency/cost of a
 synchronous regeneration gate on every request.
+
+**Phase 3 — shipped, confined to the "svg" (Minimalist Line Art) style.**
+`designImage()` (raster style) is untouched. For "svg" style, `renderConceptArt()`
+in `src/lib/gemini.ts` now:
+
+1. Generates illustration ONLY via `designImageArtOnly()` (written back in
+   the original file, never called before this), with an explicit fixed
+   layout: illustration confined to the top 74% of the 4500x5400 canvas,
+   bottom 26% left transparent.
+2. Renders the exact phrase with real font glyph outlines via **Satori**
+   (`src/lib/text-layer.ts`), not the image model — this is the actual fix
+   for "a text model/image model can't hand-draw letterforms," the root
+   cause identified in §1. Font is Archivo Black (OFL), vendored at
+   `public/fonts/` so it ships in the Docker image via the existing
+   `COPY public` step — no separate Dockerfile change needed.
+3. Composites the two transparent layers with `sharp`.
+
+`generateBatch`, `realizeDesign`, and the retry route were all pointed at
+this one function instead of each re-implementing "how do we render this
+design" — that duplication is exactly what caused the isRaster/isSVG bugs
+fixed in Phases 0–2. `isDarkGarment()` (also new, in `prompts.ts`) is the
+single source of truth for light-vs-dark ink, shared between the image-model
+prompt and Satori's ink color, so they can't disagree.
+
+Real bugs found while verifying this end-to-end:
+- The art-only illustration model **ignored "do not render any text"** and
+  drew its own duplicate lettering into the illustration layer on the first
+  test, defeating the point (the shirt read "MERCURY IN MICROWAVE" twice, in
+  two different typefaces). Fixed by substantially strengthening that
+  instruction (repeated, more emphatic, explicitly framed as "a separate
+  process renders the phrase, not you"). Measured clean afterward — see
+  below, this held across every sample checked.
+- Satori pulls in `harfbuzzjs`, whose emscripten-generated WASM loader
+  locates `hb.wasm` relative to its own `__dirname` at runtime. Next's
+  bundler rewrites that path, producing `ENOENT` on a nonsense path
+  (`C:\ROOT\...\hb.wasm`) — same class of problem `sharp` and
+  `@imgly/background-removal-node` already had. Fixed by adding `satori` to
+  `serverExternalPackages` in `next.config.ts`. Verified the fix holds in a
+  real production build: ran `next build`, assembled the `.next/standalone`
+  output the way the Dockerfile does, and generated real "svg"-style designs
+  against `node server.js` — confirmed `harfbuzzjs`'s `hb.wasm` is included
+  automatically by Next's output file tracing (unlike `sharp`/`@imgly`, no
+  manual Dockerfile `COPY` line was needed here).
+- `compositePhraseBand`'s first version resized the illustration to the
+  *full* canvas with `fit:"contain"` and trusted that the model's aspect
+  ratio matched the canvas closely enough that the reserved bottom band
+  stayed clear. It doesn't reliably: Gemini's actual output dimensions don't
+  exactly match `PRINT_CANVAS_WIDTH:PRINT_CANVAS_HEIGHT`, so the band's
+  position depended on the model's cooperation, not geometry. Fixed by
+  resizing the illustration to exactly fill the top region
+  (`PRINT_CANVAS_HEIGHT - PRINT_TEXT_BAND_HEIGHT`) and compositing it at
+  `top:0` on a blank canvas — the band is reserved by construction now,
+  regardless of what aspect ratio the model returns.
+
+**Eval harness run on the code being shipped** (`--style svg --per 1
+--keywords 8`, n=8, after both fixes above): 0/8 garment-in-graphic, 0/8
+flagged duplicate/garbled lettering in the illustration — the "no text"
+fix held. But the harness also reported **8/8 "expected phrase entirely
+missing from the image."** That contradicts what the pipeline is
+structurally guaranteed to produce (Satori composites the exact phrase
+deterministically; there's no code path that skips it), so before trusting
+either number I opened the actual saved PNGs for 3 of the corresponding
+designs, generated with the same code, and checked them directly: in all
+three the phrase is present, correctly spelled, and clearly legible in the
+bottom band. This is the same category of false positive as the
+transparency check in Phase 2, not a real defect — a large (4500x5400),
+very tall image with proportionally small text confined to the bottom 26%
+is a plausible case for the reviewer's vision input to downsample the
+detail away before it ever "sees" the text. **`imageReview` should not be
+trusted for either transparency or phrase-presence on this two-layer
+composite** — both need to be verified against the actual output (alpha via
+`sharp`, phrase via direct visual check or a review pass at a lower,
+report-what-you-actually-see resolution) rather than taken at face value.
+This is a limitation of the QA method, not the shipped design pipeline.
+
+Verified end-to-end against the live key (dev and standalone-production
+build both): alpha channel confirmed via raw pixel sampling (not just
+`sharp` metadata) — sampled transparent corners read alpha=0, and sampled
+text-band pixels read the exact ink color `isDarkGarment()` picked
+(`#111111` on a White-garment request, `#ffffff` on Black). Raster style
+re-tested after the shared-code refactor and produces the same quality as
+Phase 1, unaffected.

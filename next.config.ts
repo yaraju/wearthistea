@@ -8,6 +8,11 @@ const nextConfig: NextConfig = {
     "@prisma/client",
     "@imgly/background-removal-node",
     "onnxruntime-node",
+    // satori pulls in harfbuzzjs, whose emscripten-generated loader locates
+    // hb.wasm relative to its own __dirname at runtime — bundling it rewrites
+    // that path and breaks the lookup (ENOENT), same class of problem as the
+    // native packages above.
+    "satori",
     "@opentelemetry/sdk-node",
     "@opentelemetry/auto-instrumentations-node",
     "@google-cloud/opentelemetry-cloud-trace-exporter",

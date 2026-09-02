@@ -1,7 +1,8 @@
 import { GoogleGenAI } from "@google/genai";
 import { settings } from "@/config/settings";
-import { prompts, type Concept } from "@/config/prompts";
+import { prompts, isDarkGarment, type Concept } from "@/config/prompts";
 import { removeBgB64 } from "./background-removal";
+import { compositePhraseBand, PRINT_CANVAS_WIDTH, PRINT_CANVAS_HEIGHT, PRINT_TEXT_BAND_HEIGHT } from "./text-layer";
 import { langfuse } from "./langfuse";
 
 let client: GoogleGenAI | null = null;
@@ -150,6 +151,53 @@ function createLimiter(concurrency: number) {
 }
 
 /**
+ * Render one concept's final print-ready art. This is the single place that
+ * decides how a concept becomes pixels — generateBatch, realizeDesign, and
+ * the retry route all call this instead of each re-implementing the
+ * raster-vs-svg split, which is exactly the kind of duplicated logic that
+ * drifted out of sync earlier in this pipeline's history.
+ *
+ * - "raster": one image-model call draws illustration and text together.
+ * - "svg": the image model draws illustration ONLY (designImageArtOnly) —
+ *   it's unreliable at hand-drawing legible letterforms — and the exact
+ *   phrase is rendered deterministically with real font glyphs (Satori),
+ *   then composited into the fixed bottom band the illustration prompt is
+ *   instructed to leave empty. Guarantees correct spelling and legibility
+ *   for the "Minimalist Line Art" style, independent of the image model.
+ *
+ * `runBgRemoval` lets a caller share a concurrency limiter across a batch of
+ * parallel renders (ONNX background removal is the CPU/memory-heavy local
+ * step); single-design callers can omit it.
+ */
+export async function renderConceptArt(
+  concept: Concept,
+  parent?: any,
+  runBgRemoval: (fn: () => Promise<string>) => Promise<string> = (fn) => fn()
+): Promise<string> {
+  const isSvgStyle = concept.artStyle === "svg";
+  const genPrompt = isSvgStyle ? prompts.designImageArtOnly(concept) : prompts.designImage(concept);
+
+  let imageB64 = await generateImage(genPrompt, settings.gemini.imagenFastModel, parent);
+
+  try {
+    imageB64 = await runBgRemoval(() => removeBgB64(imageB64));
+  } catch {
+    // Best-effort: the prompt already asks for a transparent background, so
+    // fall back to the model's raw output rather than failing generation
+    // over this local step.
+  }
+
+  if (!isSvgStyle) return imageB64;
+
+  return compositePhraseBand(imageB64, concept.phrase, {
+    canvasWidth: PRINT_CANVAS_WIDTH,
+    canvasHeight: PRINT_CANVAS_HEIGHT,
+    bandHeight: PRINT_TEXT_BAND_HEIGHT,
+    color: isDarkGarment(concept.color || "Black") ? "#ffffff" : "#111111",
+  });
+}
+
+/**
  * Stage 1: write concepts, then render each one's final print-ready artwork
  * directly with the image model (no hand-authored SVG intermediate — a text
  * model cannot reliably draw illustration or letterforms via raw path data,
@@ -233,34 +281,15 @@ export async function generateBatch(
     );
     if (concepts.length === 0) throw new Error("No valid concepts were produced.");
 
-    // Stage 1b: real illustrated artwork per concept, in parallel. One
-    // concept failing (quota, model refusal, etc.) doesn't take down the
-    // rest of the batch — it just comes back with `error` set.
+    // Stage 1b: real artwork per concept, in parallel. One concept failing
+    // (quota, model refusal, etc.) doesn't take down the rest of the batch —
+    // it just comes back with `error` set.
     const limitBgRemoval = createLimiter(2);
     const items: BatchItem[] = await Promise.all(
       concepts.map(async (c) => {
         const withStyle: Concept = { ...c, artStyle: style, category, productType, color };
         try {
-          let imageB64 = await generateImage(
-            prompts.designImage(withStyle),
-            settings.gemini.imagenFastModel,
-            observation
-          );
-
-          const bgSpan = observation.span({
-            name: "removeBackground",
-            input: { title: c.title },
-          });
-          try {
-            imageB64 = await limitBgRemoval(() => removeBgB64(imageB64));
-            bgSpan.end({ output: "success" });
-          } catch (bgErr) {
-            // Best-effort: the image prompt already asks for a transparent
-            // background, so fall back to the model's raw output rather
-            // than failing the whole design over this local step.
-            bgSpan.end({ level: "error", statusMessage: String(bgErr) });
-          }
-
+          const imageB64 = await renderConceptArt(withStyle, observation, limitBgRemoval);
           return { ...withStyle, imageB64 };
         } catch (err) {
           const error = err instanceof Error ? err.message : String(err);

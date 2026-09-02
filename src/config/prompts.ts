@@ -39,6 +39,16 @@ const asJsonString = (value: string) => JSON.stringify(String(value ?? "").trim(
 
 const q = (value: string) => JSON.stringify(clean(value));
 
+const DARK_GARMENT_COLORS = new Set(["black", "navy", "charcoal"]);
+
+/**
+ * Whether ink should go light-on-dark or dark-on-light for a garment color.
+ * Single source of truth — the image-model prompt and the Satori text-layer
+ * ink color (rendered deterministically outside the model) must never
+ * disagree about which way this goes.
+ */
+export const isDarkGarment = (color: string) => DARK_GARMENT_COLORS.has((color || "Black").toLowerCase());
+
 /** Shared brand voice. */
 const BRAND_VOICE = `
 You are the lead designer for wearthistea.com, a streetwear brand that turns
@@ -232,8 +242,8 @@ Create a high-resolution, print-ready ${c.productType || "T-shirt"} GRAPHIC ONLY
 
 This graphic will be printed on a ${c.color || "Black"} ${c.productType || "T-shirt"} (${c.category || "Clothing"}).
 
-${(c.color || "Black").toLowerCase() === "black" || (c.color || "Black").toLowerCase() === "navy" || (c.color || "Black").toLowerCase() === "charcoal" 
-  ? "IMPORTANT: The t-shirt color is DARK. Use bright, high-contrast colors (white, neons, pastels) so the design is visible." 
+${isDarkGarment(c.color || "Black")
+  ? "IMPORTANT: The t-shirt color is DARK. Use bright, high-contrast colors (white, neons, pastels) so the design is visible."
   : "IMPORTANT: The t-shirt color is LIGHT. Use dark, high-contrast colors (black, deep blues, rich reds) so the design is visible."
 }
 
@@ -290,33 +300,54 @@ Create a high-resolution, print-ready t-shirt ILLUSTRATION ONLY.
 
 This illustration will be printed on a ${c.color || "Black"} ${c.productType || "T-shirt"}.
 
-${(c.color || "Black").toLowerCase() === "black" || (c.color || "Black").toLowerCase() === "navy" || (c.color || "Black").toLowerCase() === "charcoal" 
-  ? "IMPORTANT: The t-shirt color is DARK. Use bright, high-contrast colors (white, neons, pastels) so the illustration is visible." 
+${isDarkGarment(c.color || "Black")
+  ? "IMPORTANT: The t-shirt color is DARK. Use bright, high-contrast colors (white, neons, pastels) so the illustration is visible."
   : "IMPORTANT: The t-shirt color is LIGHT. Use dark, high-contrast colors (black, deep blues, rich reds) so the illustration is visible."
 }
 
-Do NOT render any text, letters, numbers, captions, labels, watermarks, logos,
-signatures, or readable marks anywhere in the image.
+HARD CONSTRAINT — READ THIS TWICE: this illustration must contain ZERO
+typography of any kind. No text, letters, numbers, words, captions, titles,
+wordmarks, lettering treatments, labels, watermarks, logos, signatures,
+speech-bubble text, sign/screen/label text within the scene, or any other
+readable marks anywhere in the image — not even the phrase itself, not even
+stylized, not even partially. A separate deterministic process (not you)
+renders the exact phrase as a real typeface afterward and composites it into
+the empty band described below. If you include any lettering here, it will
+visually collide with that separately-rendered text. Draw the scene only.
 
-This artwork will later receive a separate text layer with the phrase:
+This is the final transparent artwork to upload to Printify — it is the print
+file itself, not a photo or drawing OF a printed product. Do NOT show a
+t-shirt, model, hanger, wall, studio, paper, sticker, mockup, shadow, floor,
+background scene, or product photo. Do not draw a garment outline or collar
+around the illustration.
+
+The phrase this illustration is thematically about (for context only — DO
+NOT draw these words or any words):
 ${q(c.phrase)}
 
 ${PRINT_SPECS}
 
 STYLE:
-Bold editorial line-art streetwear graphic. Screen-print / DTG-ready aesthetic.
-Limited punchy palette, high contrast, clean negative space, crisp outlines,
-strong silhouette, readable thumbnail shape.
+Minimalist single-color vector line art. Uniform medium stroke weight, no
+fills except solid black/white, no gradients, no shading, no crosshatching,
+no photographic texture. Reads cleanly as a screen-print stencil even at
+small thumbnail size — think badge/emblem or clean icon illustration.
 
 VISUAL:
 ${clean(c.visualConcept)}
 
 ${c.vibe ? `VIBE: ${clean(c.vibe)}` : ""}
 
-COMPOSITION:
-Centered chest-print illustration with intentional negative space where the
-phrase can be added later. Premium internet-era streetwear, not clipart, not a
-meme screenshot, not a poster.
+COMPOSITION — FOLLOW EXACTLY, this is not a suggestion:
+The canvas is a fixed 4500x5400px vertical rectangle. Confine the entire
+illustration to the TOP 74% of that canvas (roughly the top 4000px),
+centered horizontally. The BOTTOM 26% of the canvas (the bottom ~1400px)
+MUST be left completely empty and fully transparent — no illustration
+elements, texture, shading, or shadow may extend into that bottom band. The
+phrase text will be placed into that empty bottom band afterward — by a
+separate process, not by you. Leave a small safe margin around the
+illustration within its 74% region too. Reminder: no text/lettering
+anywhere in the illustration itself, including inside the top 74% region.
 
 ${ART_RULES}
 `.trim(),
