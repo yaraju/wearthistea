@@ -24,7 +24,10 @@ export interface Concept {
   category?: string;
   productType?: string;
   color?: string;
-  svg?: string;
+  // Rendering direction for designImage(): "raster" = bold editorial
+  // illustration, "svg" = minimalist single-color vector line art. Both are
+  // rendered by the image model — this only changes the STYLE instruction.
+  artStyle?: "raster" | "svg";
 }
 
 const clean = (value: string) =>
@@ -65,19 +68,6 @@ CONCEPT RULES:
 - Avoid vague visualConcepts like "make it iconic" or "internet chaos aesthetic."
 - Vary the set: text-heavy, character-driven, object-driven, badge/emblem, mascot, and scene ideas.
 - Avoid repeating the same pun or the same "tea cup" idea across concepts.
-`.trim();
-
-/** SVG vector art rules. */
-const SVG_RULES = `
-SVG RULES:
-- Clean, minimalist streetwear line art.
-- Use only valid SVG elements (<path>, <circle>, <rect>, <g>).
-- DO NOT USE <text> tags. Any text or phrases must be converted to <path> data.
-- Text-as-paths ensures perfect rendering regardless of system fonts.
-- No external links, images, or CSS <style> blocks (use inline attributes).
-- Optimized for chest print: centered in a 500x600 viewBox.
-- Single color (high contrast to garment) or very limited punchy palette.
-- Output valid, clean XML code as a string.
 `.trim();
 
 /** Legal and print guardrails reused inside image prompts. */
@@ -235,84 +225,6 @@ JSON format:
 }
 `.trim(),
 
-  /** ── 1.2 SVG BATCH GENERATOR — text model ──────────────────────────────── */
-  batchSVGSystem: `${BRAND_VOICE}
-
-You are a vector art designer. You generate a set of t-shirt concepts and their corresponding SVG code.
-
-WORKFLOW:
-1. Output a JSON object containing an array of concepts.
-2. For each concept, include an "svg" field containing the clean SVG code.
-
-${CONCEPT_RULES}
-${SVG_RULES}
-`.trim(),
-
-  batchSVGUser: (keyword: string, count: number) => `
-TEA INPUT:
-${asJsonString(keyword)}
-
-Generate EXACTLY ${count} concepts as JSON, including the SVG code for each.
-
-JSON format:
-{
-  "concepts": [
-    {
-      "title": "string",
-      "phrase": "string",
-      "visualConcept": "string",
-      "vibe": "string",
-      "blurb": "string",
-      "svg": "string (valid SVG XML)"
-    }
-  ]
-}
-`.trim(),
-
-  conceptSVGSchema: {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      concepts: {
-        type: "array",
-        items: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            title: { type: "string" },
-            phrase: { type: "string" },
-            visualConcept: { type: "string" },
-            vibe: { type: "string" },
-            blurb: { type: "string" },
-            svg: { type: "string", description: "Clean SVG XML code" },
-          },
-          required: ["title", "phrase", "visualConcept", "vibe", "blurb", "svg"],
-        },
-      },
-    },
-    required: ["concepts"],
-  } as const,
-
-  /** ── 1.3 SINGLE SVG GENERATOR ─────────────────────────────────────────── */
-  svgSystem: `${BRAND_VOICE}
-
-You are a vector art specialist. You generate clean, streetwear-style SVG code for t-shirt designs.
-
-${SVG_RULES}
-`.trim(),
-
-  svgUser: (c: Concept) => `
-Generate a single streetwear SVG graphic for this concept:
-Title: ${c.title}
-Phrase: ${c.phrase}
-Visual: ${c.visualConcept}
-Vibe: ${c.vibe}
-
-Target Garment Color: ${c.color || "Black"}
-
-Return ONLY the SVG code. No markdown. No commentary.
-`.trim(),
-
   /** ── 2. CLEAN PRINT-READY ARTWORK — image model ─────────────────────────── */
   designImage: (c: Concept) =>
     `
@@ -325,16 +237,26 @@ ${(c.color || "Black").toLowerCase() === "black" || (c.color || "Black").toLower
   : "IMPORTANT: The t-shirt color is LIGHT. Use dark, high-contrast colors (black, deep blues, rich reds) so the design is visible."
 }
 
-This is the final transparent artwork to upload to Printify.
+This is the final transparent artwork to upload to Printify — it is the print
+file itself, not a photo or drawing OF a printed product.
 Do NOT show a t-shirt, model, hanger, wall, studio, paper, sticker, mockup,
-shadow, floor, background scene, or product photo.
+shadow, floor, background scene, or product photo. Do not draw a garment
+outline or collar around the design — the graphic will be placed onto the
+real garment separately. Crop tight to the illustration and text only.
 
 ${PRINT_SPECS}
 
 STYLE:
-Bold editorial line-art streetwear graphic. Screen-print / DTG-ready aesthetic.
+${
+  c.artStyle === "svg"
+    ? `Minimalist single-color vector line art. Uniform medium stroke weight,
+no fills except solid black/white, no gradients, no shading, no crosshatching,
+no photographic texture. Reads cleanly as a screen-print stencil even at
+small thumbnail size — think badge/emblem or clean icon illustration.`
+    : `Bold editorial line-art streetwear graphic. Screen-print / DTG-ready aesthetic.
 Limited punchy palette, high contrast, clean negative space, crisp outlines,
-strong silhouette, readable thumbnail shape.
+strong silhouette, readable thumbnail shape.`
+}
 
 TEXT:
 Render exactly this phrase and nothing else:

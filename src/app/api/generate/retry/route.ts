@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { generateImage, generateSingleSVG } from "@/lib/gemini";
+import { generateImage } from "@/lib/gemini";
 import { compositeOnTee } from "@/lib/mockup";
 import { saveImage } from "@/lib/storage";
+import { removeBgB64 } from "@/lib/background-removal";
 import { settings } from "@/config/settings";
 
 export const runtime = "nodejs";
@@ -32,21 +33,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Design not found." }, { status: 404 });
     }
 
-    let designB64 = "";
-    
-    const isSVG = design.style === "svg";
-
-    if (isSVG) {
-      designB64 = await generateSingleSVG({
-        title: design.title,
-        phrase: design.phrase,
-        visualConcept: design.visualConcept,
-        vibe: design.vibe ?? undefined,
-        blurb: design.blurb ?? undefined,
-        color: design.variantColor || settings.printify.defaultColor,
-      });
-    } else {
-      designB64 = await generateImage(design.designPrompt);
+    // designPrompt is the exact prompt used to render this design's art —
+    // replaying it is how a retry reproduces the same concept.
+    let designB64 = await generateImage(design.designPrompt);
+    try {
+      designB64 = await removeBgB64(designB64);
+    } catch {
+      // Best-effort — fall back to the model's raw (already prompted for
+      // transparency) output rather than failing the retry over this step.
     }
 
     const base = `${design.id}-${Date.now()}`;

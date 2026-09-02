@@ -35,6 +35,9 @@
     "winston": "^3.19.0",
     "zod": "^4.4.3"
   },
+  "overrides": {
+    "sharp": "$sharp"
+  },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",

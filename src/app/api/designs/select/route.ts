@@ -57,10 +57,14 @@ export async function POST(req: Request) {
       { status: 409 }
     );
 
-  // Stage 2: Realize design if it's still a preview
-  if (design.status === "preview") {
+  // Realize (or re-realize) when: this is a legacy row that never got past
+  // Stage 1 preview, or the buyer picked a different garment color at
+  // checkout than the one the art was actually generated for — designImage()
+  // picks ink color (light-on-dark vs dark-on-light) from the garment color,
+  // so a color change can otherwise ship art that's invisible on the tee.
+  const colorChanged = Boolean(design.variantColor) && design.variantColor !== body.color;
+  if (design.status !== "generated" || colorChanged) {
     try {
-      // Temporarily update to variant colors so realization uses correct palette
       await prisma.design.update({
         where: { id: body.designId },
         data: {

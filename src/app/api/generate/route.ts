@@ -50,8 +50,13 @@ export async function POST(req: Request) {
 
   try {
     const count = settings.optionsPerKeyword;
-    // Step 1: Unified Batched Call (Concepts + SVG Previews)
-    const batchItems = await generateBatch(keyword, count, style, trace);
+    // Step 1: concepts + real print-ready artwork, generated in parallel.
+    const batchItems = await generateBatch(
+      keyword,
+      count,
+      { style, category, productType, color: color || settings.printify.defaultColor },
+      trace
+    );
     
     const batchSpan = trace.span({ name: "create-batch-row" });
     const batch = await prisma.batch.create({ data: { keyword } }).catch((err) => {
@@ -72,15 +77,15 @@ export async function POST(req: Request) {
       let designImagePath = "";
       let productImagePath = "";
       const designB64 = item.imageB64 || "";
-      let status = item.error ? "failed" : "preview";
+      let status = item.error ? "failed" : "generated";
       let errorMessage: string | null = item.error || null;
 
       if (!item.error && designB64) {
         try {
-          // Save the initial SVG preview as the design file
+          // Save the print-ready design image
           const saveDesignSpan = trace.span({ name: "save-design-image" });
           try {
-            designImagePath = await saveImage(batch.id, `${base}-preview.png`, designB64);
+            designImagePath = await saveImage(batch.id, `${base}-design.png`, designB64);
             saveDesignSpan.end({ output: designImagePath });
           } catch (err) {
             saveDesignSpan.end({ level: "ERROR", statusMessage: String(err) });
@@ -135,14 +140,14 @@ export async function POST(req: Request) {
           vibe: c.vibe ?? null,
           blurb: c.blurb ?? null,
           style,
-          designPrompt: `Stage 1: SVG Preview (${style} mode)`,
+          designPrompt: prompts.designImage(c),
           productPrompt: `[mockup composite of clean design on ${
             c.color || settings.printify.defaultColor
           } tee]`,
           designImagePath,
           productImagePath,
           designImageData: designImagePath ? designB64 : null,
-          designSVGData: item.svg ?? null,
+          variantColor: c.color || settings.printify.defaultColor,
           status,
           errorMessage,
         },

@@ -1,7 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { settings } from "@/config/settings";
 import { prompts, type Concept } from "@/config/prompts";
-import { svgToPng } from "./svg-utils";
+import { removeBgB64 } from "./background-removal";
 import { langfuse } from "./langfuse";
 
 let client: GoogleGenAI | null = null;
@@ -120,19 +120,64 @@ export interface BatchItem extends Concept {
 }
 
 /**
- * Modernized: Generate concepts AND SVG previews in a single fast call.
- * Both Raster and SVG modes start with minimalist vector previews (Stage 1).
+ * Caps how many callers run at once; extra callers queue until a slot frees
+ * up. Used to bound local background-removal work (ONNX inference is
+ * CPU/memory heavy) independent of how many concepts are in a batch —
+ * Gemini calls themselves stay fully parallel since they're network-bound.
  */
+function createLimiter(concurrency: number) {
+  let active = 0;
+  const queue: (() => void)[] = [];
+  const next = () => {
+    if (active >= concurrency || queue.length === 0) return;
+    active++;
+    const run = queue.shift()!;
+    run();
+  };
+  return function limit<T>(fn: () => Promise<T>): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      queue.push(() => {
+        fn()
+          .then(resolve, reject)
+          .finally(() => {
+            active--;
+            next();
+          });
+      });
+      next();
+    });
+  };
+}
+
+/**
+ * Stage 1: write concepts, then render each one's final print-ready artwork
+ * directly with the image model (no hand-authored SVG intermediate — a text
+ * model cannot reliably draw illustration or letterforms via raw path data,
+ * see .junie/plans/design-quality-improvement-plan.md). Every concept is
+ * fully realized here; there is no separate "preview vs realized" quality
+ * gap for the caller to bridge later.
+ */
+export interface GenerateBatchOptions {
+  style?: "raster" | "svg";
+  category?: string;
+  productType?: string;
+  color?: string;
+}
+
 export async function generateBatch(
   keyword: string,
   count: number,
-  mode: "raster" | "svg" = "raster",
+  options: GenerateBatchOptions = {},
   parent?: any
 ): Promise<BatchItem[]> {
+  const { style = "raster", category, productType, color } = options;
   const observation = (parent || langfuse).span({
     name: "generateBatch",
-    input: { keyword, count, mode },
-    metadata: { model: settings.gemini.flashLiteModel },
+    input: { keyword, count, style, category, productType, color },
+    metadata: {
+      conceptModel: settings.gemini.flashLiteModel,
+      imageModel: settings.gemini.imagenFastModel,
+    },
   });
 
   if (!hasApiKey()) {
@@ -147,27 +192,27 @@ export async function generateBatch(
   }
 
   try {
-    // Use Flash Lite for Stage 1 batching (Concepts + SVG Previews)
+    // Stage 1a: fast structured concept writing (text only — no illustration).
     const generationObservation = observation.generation({
-      name: "gemini-batch-gen",
+      name: "gemini-batch-concepts",
       model: settings.gemini.flashLiteModel,
       modelParameters: {
         temperature: settings.gemini.textTemperature,
         responseMimeType: "application/json",
       },
-      input: prompts.batchSVGUser(keyword, count),
+      input: prompts.batchUser(keyword, count),
     });
 
     const res = await ai().models.generateContent({
       model: settings.gemini.flashLiteModel,
       contents: [
-        { role: "user", parts: [{ text: prompts.batchSVGUser(keyword, count) }] },
+        { role: "user", parts: [{ text: prompts.batchUser(keyword, count) }] },
       ],
       config: {
-        systemInstruction: prompts.batchSVGSystem,
+        systemInstruction: prompts.batchSystem,
         temperature: settings.gemini.textTemperature,
         responseMimeType: "application/json",
-        responseSchema: prompts.conceptSVGSchema as unknown as Record<string, unknown>,
+        responseSchema: prompts.conceptSchema as unknown as Record<string, unknown>,
       },
     });
 
@@ -186,27 +231,41 @@ export async function generateBatch(
     const concepts = (parsed.concepts ?? []).filter(
       (c): c is Concept => Boolean(c?.title && c?.phrase && c?.visualConcept)
     );
+    if (concepts.length === 0) throw new Error("No valid concepts were produced.");
 
-    const items = await Promise.all(
+    // Stage 1b: real illustrated artwork per concept, in parallel. One
+    // concept failing (quota, model refusal, etc.) doesn't take down the
+    // rest of the batch — it just comes back with `error` set.
+    const limitBgRemoval = createLimiter(2);
+    const items: BatchItem[] = await Promise.all(
       concepts.map(async (c) => {
-        let imageB64 = "";
-        let error: string | undefined;
-        if (c.svg) {
-          const svgSpan = observation.span({ name: "svgToPng", input: { svg: c.svg.slice(0, 100) + "..." } });
+        const withStyle: Concept = { ...c, artStyle: style, category, productType, color };
+        try {
+          let imageB64 = await generateImage(
+            prompts.designImage(withStyle),
+            settings.gemini.imagenFastModel,
+            observation
+          );
+
+          const bgSpan = observation.span({
+            name: "removeBackground",
+            input: { title: c.title },
+          });
           try {
-            // Even for "raster" mode, we render the SVG as an initial preview.
-            imageB64 = await svgToPng(c.svg);
-            svgSpan.end({ output: "success" });
-          } catch (err) {
-            error = `SVG rendering failed: ${
-              err instanceof Error ? err.message : String(err)
-            }`;
-            svgSpan.end({ level: "error", statusMessage: error });
+            imageB64 = await limitBgRemoval(() => removeBgB64(imageB64));
+            bgSpan.end({ output: "success" });
+          } catch (bgErr) {
+            // Best-effort: the image prompt already asks for a transparent
+            // background, so fall back to the model's raw output rather
+            // than failing the whole design over this local step.
+            bgSpan.end({ level: "error", statusMessage: String(bgErr) });
           }
-        } else {
-          error = "SVG code missing in response";
+
+          return { ...withStyle, imageB64 };
+        } catch (err) {
+          const error = err instanceof Error ? err.message : String(err);
+          return { ...withStyle, imageB64: "", error };
         }
-        return { ...c, imageB64, error };
       })
     );
 
@@ -217,29 +276,6 @@ export async function generateBatch(
     observation.end({ level: "error", statusMessage: message });
     throw err;
   }
-}
-
-/**
- * Generate a single SVG for a concept (used for retries).
- */
-export async function generateSingleSVG(concept: Concept): Promise<string> {
-  if (!hasApiKey()) return DUMMY_PNG_B64;
-
-  const res = await ai().models.generateContent({
-    model: settings.gemini.textModel,
-    contents: [{ role: "user", parts: [{ text: prompts.svgUser(concept) }] }],
-    config: {
-      systemInstruction: prompts.svgSystem,
-      temperature: settings.gemini.textTemperature,
-    },
-  });
-
-  const text = res.text;
-  if (!text) throw new Error("SVG model returned no text.");
-
-  const match = text.match(/<svg[\s\S]*<\/svg>/);
-  const svg = match ? match[0] : text;
-  return svgToPng(svg);
 }
 
 /**

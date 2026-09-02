@@ -1,5 +1,5 @@
 import { prisma } from "./prisma";
-import { ai, generateImage } from "./gemini";
+import { generateImage } from "./gemini";
 import { settings } from "@/config/settings";
 import { prompts, type Concept } from "@/config/prompts";
 import { saveImage } from "./storage";
@@ -9,9 +9,13 @@ import { compositeOnTee } from "./mockup";
 import { langfuse } from "./langfuse";
 
 /**
- * Stage 2: Realize a design into high-resolution print-ready output.
+ * (Re)realize a design into high-resolution print-ready output.
+ * Since Stage 1 (generateBatch) now renders final art directly, callers only
+ * need this for two cases: a legacy "preview"-status row from before that
+ * change, or the buyer picking a different garment color at checkout than
+ * the one the art was generated for.
  * For Raster: High-Res Nano Banana Pro + Local Background Removal.
- * For SVG: Sharp high-res rasterization.
+ * For SVG (legacy rows only): Sharp high-res rasterization of stored vector data.
  */
 export async function realizeDesign(designId: string, parent?: any) {
   const observation = (parent || langfuse).span({
@@ -28,51 +32,25 @@ export async function realizeDesign(designId: string, parent?: any) {
     observation.end({ level: "error", statusMessage: error.message });
     throw error;
   }
-  
-  // If already realized, just return it.
-  if (design.status === "generated") {
-    observation.end({ output: "already-generated" });
-    return design;
-  }
 
-  const isRaster = design.style === "raster";
-  
+  // Callers decide whether realization is actually needed (e.g. a legacy
+  // "preview" row, or the buyer changed garment color at checkout) — this
+  // function always does the work when invoked.
+  //
+  // Branch on whether there's stored vector data, not on `style`: since
+  // Phase 1, "raster" and "svg" are both art-direction choices rendered by
+  // the image model (see designImage()'s STYLE branch) — neither produces
+  // designSVGData anymore. Only a genuinely legacy hand-drawn-SVG row (from
+  // before that change) has designSVGData, and only that row needs the
+  // sharp-rasterization path below.
+  const useImageModel = !design.designSVGData;
+
   let finalDesignB64 = "";
+  let fullPrompt = "";
   const finalStatus = "generated";
 
   try {
-    if (isRaster) {
-      // Stage 2 (Raster): High-res Imagen realization
-      let spatialPrompt = "";
-      
-      // Spatial Mapping: Describe the layout of the SVG wireframe to guide Imagen
-      if (design.designSVGData) {
-        const spatialObservation = observation.generation({
-          name: "spatial-mapping",
-          model: settings.gemini.flashLiteModel,
-          input: design.designSVGData,
-        });
-        try {
-          const layoutRes = await ai().models.generateContent({
-            model: settings.gemini.flashLiteModel,
-            contents: [
-              { 
-                role: "user", 
-                parts: [{ text: `Describe the spatial layout of this SVG in one short sentence for an image generation prompt. Focus on the relative positions of text and graphic elements: \n\n${design.designSVGData}` }] 
-              },
-            ],
-          });
-          const layoutDesc = layoutRes.text;
-          spatialObservation.end({ output: layoutDesc });
-          if (layoutDesc) {
-            spatialPrompt = `Follow this layout precisely: ${layoutDesc.trim()}. `;
-          }
-        } catch (e) {
-          spatialObservation.end({ level: "error", statusMessage: String(e) });
-          console.warn("Spatial mapping failed, proceeding with standard prompt.", e);
-        }
-      }
-
+    if (useImageModel) {
       const concept: Concept = {
         title: design.title,
         phrase: design.phrase,
@@ -80,10 +58,11 @@ export async function realizeDesign(designId: string, parent?: any) {
         vibe: design.vibe || undefined,
         blurb: design.blurb || undefined,
         color: design.variantColor || settings.printify.defaultColor,
+        artStyle: design.style === "svg" ? "svg" : "raster",
       };
 
-      const fullPrompt = `${spatialPrompt}${prompts.designImage(concept)}`;
-      
+      fullPrompt = prompts.designImage(concept);
+
       // Generate with Nano Banana Pro
       finalDesignB64 = await generateImage(fullPrompt, settings.gemini.imagenFastModel, observation);
       
@@ -92,10 +71,9 @@ export async function realizeDesign(designId: string, parent?: any) {
       finalDesignB64 = await removeBgB64(finalDesignB64);
       bgObservation.end({ output: "success" });
     } else {
-      // Stage 2 (SVG): High-res rasterization of existing vector data
-      if (!design.designSVGData) throw new Error("SVG data missing for realization.");
+      // Legacy: high-res rasterization of previously stored vector data.
       const svgObservation = observation.span({ name: "svgToPng-highres" });
-      finalDesignB64 = await svgToPng(design.designSVGData);
+      finalDesignB64 = await svgToPng(design.designSVGData!);
       svgObservation.end({ output: "success" });
     }
 
@@ -125,9 +103,10 @@ export async function realizeDesign(designId: string, parent?: any) {
         productImagePath,
         designImageData: finalDesignB64,
         status: finalStatus,
-        designPrompt: isRaster 
-          ? `Stage 2: Realized (Nano Banana Pro + Local BG Removal)` 
-          : `Stage 2: Realized (SVG High-Res)`,
+        // Keep designPrompt replayable: for the raster path, store the exact
+        // prompt that produced this art (so a later retry reproduces it);
+        // the SVG-rasterize path has no such prompt, so leave it untouched.
+        ...(useImageModel ? { designPrompt: fullPrompt } : {}),
       },
     });
 
