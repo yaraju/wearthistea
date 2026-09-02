@@ -134,6 +134,7 @@ export async function POST(req: Request) {
           visualConcept: c.visualConcept,
           vibe: c.vibe ?? null,
           blurb: c.blurb ?? null,
+          style,
           designPrompt: `Stage 1: SVG Preview (${style} mode)`,
           productPrompt: `[mockup composite of clean design on ${
             c.color || settings.printify.defaultColor

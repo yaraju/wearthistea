@@ -32,6 +32,11 @@ model Design {
   vibe          String?
   blurb         String?
 
+  // Pipeline mode this design was generated with ("raster" | "svg"). Source of
+  // truth for how to (re)render this design — never infer this from parsing
+  // designPrompt text, which is free-form and user-influenced.
+  style String @default("raster")
+
   // The exact prompts used to make the images (handy for re-rolls / debugging)
   designPrompt  String @db.Text
   productPrompt String @db.Text

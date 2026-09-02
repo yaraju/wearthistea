@@ -35,7 +35,7 @@ export async function realizeDesign(designId: string, parent?: any) {
     return design;
   }
 
-  const isRaster = design.designPrompt.toLowerCase().includes("raster");
+  const isRaster = design.style === "raster";
   
   let finalDesignB64 = "";
   const finalStatus = "generated";

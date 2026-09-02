@@ -34,8 +34,7 @@ export async function POST(req: Request) {
 
     let designB64 = "";
     
-    // Determine if it was an SVG design based on the prompt or presence of SVG data
-    const isSVG = design.designPrompt === "SVG Batch" || !!design.designSVGData;
+    const isSVG = design.style === "svg";
 
     if (isSVG) {
       designB64 = await generateSingleSVG({
