@@ -11,7 +11,15 @@ const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "yaraju@gmail.com,wearthistea@
   .map((e) => e.trim().toLowerCase())
   .filter(Boolean);
 
-export const SESSION_COOKIE = "wt_session";
+// MUST be named exactly "__session" — Firebase Hosting's CDN strips every
+// cookie except one with this exact name before forwarding a request to
+// Cloud Run (undocumented-in-code but well-known Hosting behavior: it's the
+// one cookie name allowlisted through the rewrite proxy, precisely so
+// backends behind Hosting can keep a session). Any other name round-trips
+// fine in a request that skips Hosting (e.g. curl straight to the Cloud Run
+// URL, or local dev) but silently vanishes for real browser traffic through
+// wearthistea.web.app — which is exactly the bug this was.
+export const SESSION_COOKIE = "__session";
 // Firebase's own hard cap on session cookie lifetime.
 export const SESSION_MAX_AGE_MS = 5 * 24 * 60 * 60 * 1000;
 

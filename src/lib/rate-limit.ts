@@ -6,8 +6,20 @@ import { settings } from "@/config/settings";
 // Free generation is unauthenticated on purpose (Phase 6 skips anonymous
 // Firebase auth — see AGENTS.md / the plan), so this cookie + the caller's
 // IP are the only things standing between a stranger with the URL and the
-// Gemini budget in production. It's a soft abuse guard sitting behind
-// Basic Auth in prod, not a security boundary — see incrementAndCheck.
+// Gemini budget in production — Basic Auth was deliberately turned off in
+// prod (Razorpay onboarding needs the site reachable). Soft guard, not a
+// security boundary — see incrementAndCheck.
+//
+// KNOWN LIMITATION: Firebase Hosting's CDN only forwards a cookie literally
+// named "__session" through to Cloud Run (see src/lib/auth.ts's
+// SESSION_COOKIE, which already claims that name for the admin session) —
+// any other cookie name, this one included, never makes it back on the next
+// request for real browser traffic through wearthistea.web.app. So in
+// practice the session axis below is always "new" in production and the IP
+// axis is what's actually doing the work. Not worth unifying into one
+// shared __session cookie for this — it's a soft guard either way, and
+// mixing an opaque rate-limit id into the same cookie as a Firebase-issued
+// session JWT is more complexity than the gain justifies.
 export const RATE_LIMIT_COOKIE = "wt_sid";
 
 function currentWindowStart(windowMs: number): number {
