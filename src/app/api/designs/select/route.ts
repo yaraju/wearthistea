@@ -26,8 +26,10 @@ const Body = z.object({
   customer: Customer.optional(),
 });
 
-// User picks a design on the landing page + fills in the checkout → it enters
-// the /admin approval queue with the order details attached.
+// User picks a design on the landing page + fills in the checkout → this
+// creates a new Order for that design and puts it in the /admin approval
+// queue. One Design can end up with many Orders (different buyers, or the
+// same buyer retrying) — order/shipping state never lives on Design itself.
 export async function POST(req: Request) {
   let body: z.infer<typeof Body>;
   try {
@@ -65,12 +67,12 @@ export async function POST(req: Request) {
   const colorChanged = Boolean(design.variantColor) && design.variantColor !== body.color;
   if (design.status !== "generated" || colorChanged) {
     try {
+      // variantColor is generation content (what the art was rendered
+      // against), not order content — still updated here since the buyer's
+      // color choice is what realizeDesign() needs to re-render correctly.
       await prisma.design.update({
         where: { id: body.designId },
-        data: {
-          variantSize: body.size,
-          variantColor: body.color,
-        }
+        data: { variantColor: body.color },
       });
       // realizeDesign() catches its own errors and returns a status:"failed"
       // row rather than throwing — it never reaches the catch block below on
@@ -92,11 +94,10 @@ export async function POST(req: Request) {
   }
 
   const c = body.customer;
-  const updated = await prisma.design.update({
-    where: { id: body.designId },
+  const order = await prisma.order.create({
     data: {
+      designId: body.designId,
       status: "pending",
-      selected: true,
       variantSize: body.size,
       variantColor: body.color,
       quantity: body.quantity,
@@ -117,5 +118,5 @@ export async function POST(req: Request) {
     data: { status: "queued" },
   });
 
-  return NextResponse.json({ ok: true, design: updated });
+  return NextResponse.json({ ok: true, order });
 }

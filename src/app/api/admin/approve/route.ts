@@ -8,23 +8,27 @@ import { settings } from "@/config/settings";
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
-const Body = z.object({ designId: z.string().min(1) });
+const Body = z.object({ orderId: z.string().min(1) });
 
 // Human approval → push to the active provider.
 //   Printrove: upload design → create product → place a (COD) order.
 //   Printify:  upload design → create product → publish to the sales channel.
 export async function POST(req: Request) {
-  let designId: string;
+  let orderId: string;
   try {
-    designId = Body.parse(await req.json()).designId;
+    orderId = Body.parse(await req.json()).orderId;
   } catch {
-    return NextResponse.json({ error: "designId is required." }, { status: 400 });
+    return NextResponse.json({ error: "orderId is required." }, { status: 400 });
   }
 
-  const design = await prisma.design.findUnique({ where: { id: designId } });
-  if (!design)
-    return NextResponse.json({ error: "Design not found." }, { status: 404 });
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    include: { design: true },
+  });
+  if (!order)
+    return NextResponse.json({ error: "Order not found." }, { status: 404 });
 
+  const design = order.design;
   const printPath = design.designImagePath || design.productImagePath;
   if (!printPath)
     return NextResponse.json(
@@ -36,14 +40,14 @@ export async function POST(req: Request) {
 
   // Order-placing providers need recipient + a chosen variant.
   if (provider.name !== "printify") {
-    if (!design.recipientName || !design.addressLine1 || !design.country)
+    if (!order.recipientName || !order.addressLine1 || !order.country)
       return NextResponse.json(
-        { error: "This design has no shipping details — it can't be ordered." },
+        { error: "This order has no shipping details — it can't be placed." },
         { status: 409 }
       );
-    if (!design.variantSize || !design.variantColor)
+    if (!order.variantSize || !order.variantColor)
       return NextResponse.json(
-        { error: "This design has no size/color selected." },
+        { error: "This order has no size/color selected." },
         { status: 409 }
       );
   }
@@ -72,53 +76,53 @@ export async function POST(req: Request) {
       `${design.phrase} — an original wearthistea drop. ${design.visualConcept}`;
 
     const result = await provider.fulfill({
-      referenceNumber: design.id,
+      referenceNumber: order.id,
       title: design.title,
       description,
       designBase64,
       designFileName: `${design.id}.png`,
       priceCents: settings.printify.priceCents,
-      quantity: design.quantity ?? 1,
+      quantity: order.quantity ?? 1,
       variant: {
-        size: design.variantSize ?? "",
-        color: design.variantColor ?? "",
+        size: order.variantSize ?? "",
+        color: order.variantColor ?? "",
       },
-      customer: design.recipientName
+      customer: order.recipientName
         ? {
-            name: design.recipientName,
-            email: design.recipientEmail,
-            phone: design.recipientPhone ?? "",
-            address1: design.addressLine1 ?? "",
-            address2: design.addressLine2,
-            address3: design.addressLine3,
-            city: design.city,
-            state: design.state,
-            pincode: design.pincode,
-            country: design.country ?? "",
+            name: order.recipientName,
+            email: order.recipientEmail,
+            phone: order.recipientPhone ?? "",
+            address1: order.addressLine1 ?? "",
+            address2: order.addressLine2,
+            address3: order.addressLine3,
+            city: order.city,
+            state: order.state,
+            pincode: order.pincode,
+            country: order.country ?? "",
           }
         : null,
-      cod: design.cod,
+      cod: order.cod,
     });
 
-    const updated = await prisma.design.update({
-      where: { id: designId },
+    const updated = await prisma.order.update({
+      where: { id: orderId },
       data: {
         status: "published",
-        priceCents,
-        printifyProductId: result.productId,
-        printifyUrl: result.url,
-        providerOrderId: result.orderId,
+        unitPriceCents: priceCents,
+        printroveProductId: result.productId,
+        printroveUrl: result.url,
+        printroveOrderId: result.orderId,
         trackingNumber: result.trackingNumber,
         errorMessage: null,
       },
     });
 
-    return NextResponse.json({ ok: true, design: updated });
+    return NextResponse.json({ ok: true, order: updated });
   } catch (err) {
     const message =
       err instanceof Error ? err.message : `${provider.name} push failed.`;
-    await prisma.design.update({
-      where: { id: designId },
+    await prisma.order.update({
+      where: { id: orderId },
       data: { status: "failed", errorMessage: message },
     });
     return NextResponse.json({ error: message }, { status: 502 });

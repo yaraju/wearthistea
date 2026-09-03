@@ -4,19 +4,19 @@ import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
 
-const Body = z.object({ designId: z.string().min(1) });
+const Body = z.object({ orderId: z.string().min(1) });
 
 export async function POST(req: Request) {
-  let designId: string;
+  let orderId: string;
   try {
-    designId = Body.parse(await req.json()).designId;
+    orderId = Body.parse(await req.json()).orderId;
   } catch {
-    return NextResponse.json({ error: "designId is required." }, { status: 400 });
+    return NextResponse.json({ error: "orderId is required." }, { status: 400 });
   }
 
-  const updated = await prisma.design.update({
-    where: { id: designId },
-    data: { status: "rejected", selected: false },
+  const updated = await prisma.order.update({
+    where: { id: orderId },
+    data: { status: "rejected" },
   });
-  return NextResponse.json({ ok: true, design: updated });
+  return NextResponse.json({ ok: true, order: updated });
 }

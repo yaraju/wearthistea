@@ -10,11 +10,11 @@ import {
   RefreshCw,
   AlertTriangle,
 } from "lucide-react";
-import type { DesignDTO } from "@/lib/types";
+import type { OrderDTO } from "@/lib/types";
 
-type Row = DesignDTO & { batch: { keyword: string; createdAt: string } };
+type Row = OrderDTO;
 
-const FILTERS = ["pending", "published", "approved", "rejected", "failed", "all"] as const;
+const FILTERS = ["pending", "published", "rejected", "failed", "all"] as const;
 type Filter = (typeof FILTERS)[number];
 
 export default function AdminPage() {
@@ -37,7 +37,7 @@ export default function AdminPage() {
           [data.error, data.hint].filter(Boolean).join(" — ") ||
             "Could not load the queue."
         );
-      setRows(data.designs ?? []);
+      setRows(data.orders ?? []);
       setCounts(data.counts ?? {});
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "Could not load the queue.");
@@ -147,7 +147,7 @@ function QueueCard({ row, onChange }: { row: Row; onChange: () => void }) {
       const res = await fetch(`/api/admin/${endpoint}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ designId: row.id }),
+        body: JSON.stringify({ orderId: row.id }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Action failed.");
@@ -229,9 +229,9 @@ function QueueCard({ row, onChange }: { row: Row; onChange: () => void }) {
           </div>
         )}
 
-        {row.printifyUrl && (
+        {row.printroveUrl && (
           <a
-            href={row.printifyUrl}
+            href={row.printroveUrl}
             target="_blank"
             rel="noreferrer"
             className="mt-3 inline-flex items-center gap-1.5 font-mono text-xs text-tea hover:underline"
@@ -239,15 +239,15 @@ function QueueCard({ row, onChange }: { row: Row; onChange: () => void }) {
             <ExternalLink className="h-3.5 w-3.5" aria-hidden /> view live product
           </a>
         )}
-        {row.providerOrderId && (
+        {row.printroveOrderId && (
           <p className="mt-3 font-mono text-xs text-tea">
-            Order placed · #{row.providerOrderId}
+            Order placed · #{row.printroveOrderId}
             {row.trackingNumber ? ` · track ${row.trackingNumber}` : ""}
           </p>
         )}
-        {row.printifyProductId && !row.printifyUrl && !row.providerOrderId && (
+        {row.printroveProductId && !row.printroveUrl && !row.printroveOrderId && (
           <p className="mt-3 font-mono text-xs text-tea">
-            Product #{row.printifyProductId}
+            Product #{row.printroveProductId}
           </p>
         )}
         {row.errorMessage && (

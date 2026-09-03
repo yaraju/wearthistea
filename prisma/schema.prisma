@@ -20,6 +20,10 @@ model Batch {
 }
 
 // A single generated t-shirt concept (text + product shot + clean print file).
+// Purely creative/generation content — a purchase of this design is a
+// separate Order row (one Design can have many Orders, e.g. two buyers
+// picking the same concept), so nothing shipping- or payment-related lives
+// here.
 model Design {
   id      String @id @default(cuid())
   batchId String
@@ -41,9 +45,14 @@ model Design {
   designPrompt  String @db.Text
   productPrompt String @db.Text
 
+  // Garment color this art was generated/rendered against (drives ink-color
+  // art direction and the product mockup composite) — a generation-time
+  // choice, not the color a buyer orders (see Order.variantColor).
+  variantColor String?
+
   // Stored artwork (paths under /public, served at the same URL)
   productImagePath String // styled product mockup shown in the grid
-  designImagePath  String // clean, print-ready art sent to Printify
+  designImagePath  String // clean, print-ready art sent to the provider
   // Base64 copy of the print-ready design — used as fallback when the file is
   // missing (e.g. after a redeploy wipes the ephemeral filesystem on some hosts).
   designImageData  String? @db.Text
@@ -51,18 +60,48 @@ model Design {
   designSVGData    String? @db.Text
 
   // Lifecycle: generating (concept written, artwork rendering) -> generated ->
-  // pending (queued for approval) -> approved -> published | rejected | failed
-  status   String  @default("generated")
-  selected Boolean @default(false)
+  // failed. Order-level lifecycle (approval, payment, fulfillment) lives on
+  // Order, not here.
+  status String @default("generated")
+  // Generation-failure detail (rendering/model errors) — distinct from an
+  // Order's errorMessage, which covers approval/fulfillment failures.
+  errorMessage String? @db.Text
 
-  // ── Order details ──────────────────────────────────────────────────────────
-  // Captured when a visitor picks this design on the landing page. Drives the
-  // fulfillment order placed on approval (Printrove).
-  variantSize  String?
-  variantColor String?
-  quantity     Int     @default(1)
-  cod          Boolean @default(true)
+  orders Order[]
 
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([batchId])
+}
+
+// One purchase of a Design. Split out from Design so two buyers of the same
+// concept never collide on shipping/payment state, and so a failed/retried
+// payment or fulfillment attempt has its own row to track.
+model Order {
+  id       String @id @default(cuid())
+  designId String
+  design   Design @relation(fields: [designId], references: [id])
+  userId   String?
+  user     User?  @relation(fields: [userId], references: [id])
+
+  // ── Product & variant ───────────────────────────────────────────────────
+  // "men" for now (single hardcoded product) — Phase 2 wires this to a real
+  // per-category catalog table (men | women | toddler | kids).
+  productCategory String  @default("men")
+  variantSize     String?
+  variantColor    String?
+  quantity        Int     @default(1)
+
+  // ── Pricing (populated at approval time, same timing as today's flat
+  // priceCents) ────────────────────────────────────────────────────────────
+  unitPriceCents Int?
+  gstRateBps     Int?
+  gstAmountCents Int?
+
+  // ── Recipient / shipping — nullable to match today's Printify path, which
+  // never collects a customer at all ─────────────────────────────────────
   recipientName  String?
   recipientEmail String?
   recipientPhone String?
@@ -74,21 +113,52 @@ model Design {
   pincode        String?
   country        String?
 
-  // ── Fulfillment results (provider-agnostic) ────────────────────────────────
-  // printifyProductId / printifyUrl are reused generically across providers:
-  // they hold the active provider's product id and storefront/tracking URL.
-  priceCents        Int?
-  printifyProductId String?
-  printifyUrl       String?
-  providerOrderId   String?
-  trackingNumber    String?
-  errorMessage      String? @db.Text
+  // ── Payment (Razorpay lands in a later phase; cod is the only live path
+  // today) ─────────────────────────────────────────────────────────────────
+  paymentProvider   String  @default("cod")
+  razorpayOrderId   String?
+  razorpayPaymentId String?
+  paymentStatus     String  @default("unpaid") // unpaid | paid | failed | refunded
+  cod               Boolean @default(true)
+  idempotencyKey    String? @unique
+
+  // ── Lifecycle: pending (awaiting admin approval) -> published | rejected
+  // | failed. (Payment-aware states like pending_payment/queued_for_admin_review
+  // arrive with Razorpay in a later phase.) ──────────────────────────────
+  status String @default("pending")
+
+  // ── Fulfillment results (provider-agnostic; named around the current
+  // default provider, Printrove) ──────────────────────────────────────────
+  printroveProductId String?
+  printroveUrl       String?
+  printroveOrderId   String?
+  trackingNumber     String?
+  errorMessage       String? @db.Text
+
+  // ── Invoicing (populated once GST invoicing lands) ─────────────────────
+  invoiceNumber String? @unique
+  invoiceUrl    String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@index([designId])
   @@index([status])
-  @@index([batchId])
+  @@index([razorpayOrderId])
+}
+
+// A signed-in buyer, identified by Firebase UID. Populated once magic-link
+// auth lands (Phase 6) — until then every Order.userId stays null.
+model User {
+  id             String   @id // Firebase UID
+  email          String   @unique
+  emailVerified  Boolean  @default(false)
+  authProvider   String   @default("email_link")
+  marketingOptIn Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  orders Order[]
 }
 
 model Cache {

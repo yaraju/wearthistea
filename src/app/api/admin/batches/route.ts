@@ -9,25 +9,32 @@ export async function GET(req: Request) {
   const status = url.searchParams.get("status");
 
   try {
-    const designs = await prisma.design.findMany({
-      where:
-        status && status !== "all"
-          ? { status }
-          : { status: { not: "generated" } },
+    const orders = await prisma.order.findMany({
+      where: status && status !== "all" ? { status } : undefined,
       orderBy: { updatedAt: "desc" },
-      include: { batch: { select: { keyword: true, createdAt: true } } },
+      include: {
+        design: {
+          include: { batch: { select: { keyword: true, createdAt: true } } },
+        },
+      },
       take: 200,
     });
 
-    const counts = await prisma.design.groupBy({
+    const counts = await prisma.order.groupBy({
       by: ["status"],
       _count: { _all: true },
     });
 
     return NextResponse.json({
-      designs: designs.map(({ designImageData, ...d }) => ({
-        ...d,
-        hasImageData: Boolean(designImageData),
+      orders: orders.map(({ design, ...o }) => ({
+        ...o,
+        title: design.title,
+        phrase: design.phrase,
+        vibe: design.vibe,
+        productImagePath: design.productImagePath,
+        designImagePath: design.designImagePath,
+        hasImageData: Boolean(design.designImageData),
+        batch: design.batch,
       })),
       counts: Object.fromEntries(counts.map((c) => [c.status, c._count._all])),
     });
