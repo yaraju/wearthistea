@@ -128,13 +128,21 @@ export const settings = {
       "United Kingdom",
       "Canada",
       "Australia",
-    ]),
-    /** Front-print placement in pixels — tune per product/base blank. */
+    ]), /**
+     * Front-print placement, in Printrove's design-canvas coordinate space
+     * (10x the base product's front_print_width/height — e.g. product 460's
+     * 468x588 print area gives a 4680x5880 frame). width/height is the design
+     * bounding box; top/left is its offset within that frame. To re-center
+     * for a different base product, fetch its front_print_width/height via
+     * getProductWithVariants() and solve: left = (width*10 - boxWidth) / 2,
+     * top = (height*10 - boxHeight) / 2. See scripts/test-printrove-centering.ts.
+     * Defaults below are centered for product 460 (Half Sleeve Round Neck Tee).
+     */
     print: {
       width: num(process.env.PRINTROVE_PRINT_WIDTH, 3000),
       height: num(process.env.PRINTROVE_PRINT_HEIGHT, 3000),
-      top: num(process.env.PRINTROVE_PRINT_TOP, 10),
-      left: num(process.env.PRINTROVE_PRINT_LEFT, 50),
+      top: num(process.env.PRINTROVE_PRINT_TOP, 1440),
+      left: num(process.env.PRINTROVE_PRINT_LEFT, 840),
     },
   },
 } as const;
