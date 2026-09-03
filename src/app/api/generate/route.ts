@@ -13,11 +13,25 @@ export const maxDuration = 300;
 
 const Body = z.object({
   keyword: z.string().trim().min(2).max(280),
+  // The picker on the landing page sends the product's numeric id (which we
+  // set equal to its Printrove subtypeId) — the reliable way to resolve
+  // which of our supported categories was chosen. `category`/`productType`
+  // are still accepted as free-text labels for prompt-writing/back-compat,
+  // but productId is what actually selects the fulfillment config.
+  productId: z.number().optional(),
   category: z.string().optional(),
   productType: z.string().optional(),
   color: z.string().optional(),
   style: z.enum(["raster", "svg"]).optional().default("raster"),
 });
+
+/** Resolve the picker's productId to one of our supported category keys. */
+function resolveCategory(productId?: number): string {
+  const match = settings.printrove.products.find(
+    (p) => p.enabled && p.subtypeId === productId
+  );
+  return match?.category ?? "men";
+}
 
 // Health check and main generation logic
 export async function POST(req: Request) {
@@ -32,6 +46,7 @@ export async function POST(req: Request) {
   }
 
   const { keyword, category, productType, color, style } = body;
+  const resolvedCategory = resolveCategory(body.productId);
 
   const traceId = getTraceId(req);
   const trace = langfuse.trace({
@@ -87,6 +102,7 @@ export async function POST(req: Request) {
             productPrompt: `[mockup composite of clean design on ${resolvedColor} tee]`,
             designImagePath: "",
             productImagePath: "",
+            category: resolvedCategory,
             variantColor: resolvedColor,
             status: "generating",
           },
@@ -112,7 +128,7 @@ export async function POST(req: Request) {
       batchId: batch.id,
       keyword,
       designs,
-      options: getProvider().options(),
+      options: getProvider().options(resolvedCategory),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Generation failed.";

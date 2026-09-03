@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getProvider } from "@/lib/print-provider";
 import { readImageAsBase64 } from "@/lib/storage";
-import { settings } from "@/config/settings";
+import { settings, printroveProduct } from "@/config/settings";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -55,7 +55,7 @@ export async function POST(req: Request) {
   const priceCents =
     provider.name === "printify"
       ? settings.printify.priceCents
-      : settings.printrove.retailPrice;
+      : printroveProduct(order.productCategory).retailPrice;
 
   try {
     let designBase64: string;
@@ -81,12 +81,13 @@ export async function POST(req: Request) {
       description,
       designBase64,
       designFileName: `${design.id}.png`,
-      priceCents: settings.printify.priceCents,
+      priceCents,
       quantity: order.quantity ?? 1,
       variant: {
         size: order.variantSize ?? "",
         color: order.variantColor ?? "",
       },
+      category: order.productCategory,
       customer: order.recipientName
         ? {
             name: order.recipientName,

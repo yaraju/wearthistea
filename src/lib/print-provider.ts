@@ -23,7 +23,7 @@ export interface FulfillCustomer {
 }
 
 export interface FulfillInput {
-  /** Unique reference for the order (we use the design id). */
+  /** Unique reference for the order (we use the order id). */
   referenceNumber: string;
   title: string;
   description: string;
@@ -34,6 +34,12 @@ export interface FulfillInput {
   priceCents: number;
   quantity: number;
   variant: { size: string; color: string };
+  /**
+   * Which supported garment category (men/women/toddler/kids for Printrove)
+   * this order is for — selects the product/variant/print-geometry config.
+   * Ignored by single-product providers (Printify).
+   */
+  category: string;
   /** Recipient + shipping. Required by order-placing providers (Printrove). */
   customer: FulfillCustomer | null;
   cod: boolean;
@@ -56,8 +62,11 @@ export interface VariantOptions {
 
 export interface PrintProvider {
   name: string;
-  /** Size/color/country options offered in the checkout. */
-  options(): VariantOptions;
+  /**
+   * Size/color/country options offered in the checkout, for the given
+   * garment category (ignored by single-product providers like Printify).
+   */
+  options(category?: string): VariantOptions;
   /** Push an approved selection to the provider (create product, place order…). */
   fulfill(input: FulfillInput): Promise<FulfillResult>;
 }

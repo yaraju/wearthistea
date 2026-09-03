@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { settings } from "@/config/settings";
+import { settings, printroveProduct } from "@/config/settings";
 import { realizeDesign } from "@/lib/realize";
 
 export const runtime = "nodejs";
@@ -59,6 +59,20 @@ export async function POST(req: Request) {
       { status: 409 }
     );
 
+  // Reject a size/color that isn't actually sellable for this design's
+  // category — the checkout form only ever offers valid combinations, but
+  // this is the boundary where a stale or tampered client can't slip one
+  // past us into an Order Printrove would then fail (or silently mis-sell).
+  if (settings.provider === "printrove") {
+    const product = printroveProduct(design.category);
+    if (!product.variantMap[`${body.color}|${body.size}`]) {
+      return NextResponse.json(
+        { error: `"${body.size}" in "${body.color}" isn't offered for this design.` },
+        { status: 400 }
+      );
+    }
+  }
+
   // Realize (or re-realize) when: this is a legacy row that never got past
   // Stage 1 preview, or the buyer picked a different garment color at
   // checkout than the one the art was actually generated for — designImage()
@@ -98,6 +112,7 @@ export async function POST(req: Request) {
     data: {
       designId: body.designId,
       status: "pending",
+      productCategory: design.category,
       variantSize: body.size,
       variantColor: body.color,
       quantity: body.quantity,

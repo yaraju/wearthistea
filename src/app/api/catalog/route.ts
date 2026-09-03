@@ -1,77 +1,31 @@
 import { NextResponse } from "next/server";
-import { getCategories, getParentProducts, getStockCount, PrintroveProduct } from "@/lib/printrove";
 import { settings } from "@/config/settings";
-import { CatalogCategory } from "@/lib/types";
 
 export const runtime = "nodejs";
 
+// The landing page's category/product picker. Deliberately NOT a live fetch
+// of Printrove's full catalog anymore — that offered every product Printrove
+// sells (hoodies, joggers, a dozen colors...), most of which have never been
+// tested here. This returns only the categories/products actually wired up
+// in settings.printrove.products (half sleeve, black only, for now).
 export async function GET() {
-  console.log("Catalog API called. Provider:", settings.provider);
   if (settings.provider !== "printrove") {
-    return NextResponse.json({
-      categories: [],
-      inStock: {}
-    });
+    return NextResponse.json({ categories: [] });
   }
 
-  try {
-    const [categories, parentProducts, stock] = await Promise.all([
-      getCategories(),
-      getParentProducts(),
-      getStockCount({ availability: "in_stock", per_page: 500 }),
-    ]);
+  const categories = settings.printrove.products
+    .filter((p) => p.enabled)
+    .map((p) => ({
+      id: p.subtypeId,
+      name: p.categoryLabel,
+      products: [
+        {
+          id: p.subtypeId,
+          name: p.productLabel,
+          colors: ["Black"],
+        },
+      ],
+    }));
 
-    console.log(`Fetched ${categories.length} categories, ${parentProducts.length} parent products, ${stock.length} stock items.`);
-
-    // Map parent products to their categories
-    const categoryMap = categories.reduce((acc, cat) => {
-      acc[cat.id] = { ...cat, products: [] };
-      return acc;
-    }, {} as Record<number, CatalogCategory & { products: PrintroveProduct[] }>);
-
-    parentProducts.forEach(p => {
-      if (categoryMap[p.category_id]) {
-        categoryMap[p.category_id].products.push(p);
-      }
-    });
-
-    // Group in-stock colors by product_id
-    const inStock = stock.reduce((acc, item) => {
-      if (!acc[item.product_id]) acc[item.product_id] = new Set();
-      acc[item.product_id].add(item.color);
-      return acc;
-    }, {} as Record<number, Set<string>>);
-
-    // Filter out categories that have no products
-    const resultCategories = Object.values(categoryMap)
-      .map((cat) => ({
-        ...cat,
-        products: (cat.products as PrintroveProduct[])
-          .map((p) => {
-            const colors = inStock[p.id] ? Array.from(inStock[p.id]) : [];
-            
-            // If the product is a standard t-shirt type, ensure we have some basic colors
-            // even if the stock API missed them (it sometimes only returns a subset).
-            const isTee = p.name.toLowerCase().includes("t-shirt") || p.name.toLowerCase().includes("tee");
-            const finalColors = (isTee && colors.length < 2) 
-              ? Array.from(new Set([...colors, "Black", "White", "Navy Blue", "Royal Blue", "Red", "Grey"])) 
-              : colors.length > 0 ? colors : ["Black", "White"];
-
-            return {
-              id: p.id,
-              name: p.name,
-              colors: finalColors
-            };
-          })
-          .filter((p) => p.colors.length > 0)
-      }))
-      .filter((cat) => cat.products.length > 0);
-
-    return NextResponse.json({
-      categories: resultCategories
-    });
-  } catch (err) {
-    console.error("Catalog API error:", err);
-    return NextResponse.json({ error: "Failed to fetch catalog" }, { status: 500 });
-  }
+  return NextResponse.json({ categories });
 }

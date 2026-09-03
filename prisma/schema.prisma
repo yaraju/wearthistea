@@ -45,9 +45,10 @@ model Design {
   designPrompt  String @db.Text
   productPrompt String @db.Text
 
-  // Garment color this art was generated/rendered against (drives ink-color
-  // art direction and the product mockup composite) — a generation-time
-  // choice, not the color a buyer orders (see Order.variantColor).
+  // Garment category/color this art was generated/rendered against (drives
+  // print geometry + ink-color art direction) — a generation-time choice,
+  // fixed before any Order exists, not something a buyer picks at checkout.
+  category     String  @default("men")
   variantColor String?
 
   // Stored artwork (paths under /public, served at the same URL)

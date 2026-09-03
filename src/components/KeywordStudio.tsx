@@ -116,8 +116,9 @@ export default function KeywordStudio() {
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           keyword: tea,
+          productId: selectedProduct?.id,
           category: selectedCategory?.name,
           productType: selectedProduct?.name,
           color: selectedColor,

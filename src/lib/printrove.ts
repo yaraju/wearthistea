@@ -1,4 +1,4 @@
-import { settings } from "@/config/settings";
+import { settings, printroveProduct, type PrintroveProductConfig } from "@/config/settings";
 import type {
   FulfillInput,
   FulfillResult,
@@ -116,12 +116,11 @@ async function uploadDesign(fileName: string, base64: string): Promise<number> {
 }
 
 
-function frontDesign(designId: number) {
-  const p = settings.printrove.print;
+function frontDesign(designId: number, print: PrintroveProductConfig["print"]) {
   return {
     front: {
       id: designId,
-      dimensions: { width: p.width, height: p.height, top: p.top, left: p.left },
+      dimensions: { width: print.width, height: print.height, top: print.top, left: print.left },
     },
   };
 }
@@ -131,17 +130,15 @@ async function createProduct(opts: {
   name: string;
   designId: number;
   baseVariantId: number;
+  product: PrintroveProductConfig;
 }): Promise<{ productId: number; variantId: number | null }> {
-  const baseProductId =
-    settings.printrove.productSubtypeId || settings.printrove.productId;
-
   const data = await api("/products", {
     method: "POST",
     json: {
       name: opts.name.slice(0, 120),
-      product_id: baseProductId,
+      product_id: opts.product.subtypeId,
       is_plain: false,
-      design: frontDesign(opts.designId),
+      design: frontDesign(opts.designId, opts.product.print),
       variants: [{ product_id: opts.baseVariantId }],
     },
   });
@@ -168,6 +165,7 @@ async function createOrder(opts: {
   quantity: number;
   cod: boolean;
   customer: NonNullable<FulfillInput["customer"]>;
+  product: PrintroveProductConfig;
 }): Promise<{ orderId: string | null; trackingNumber: string | null }> {
   const c = opts.customer;
   const phoneDigits = String(c.phone).replace(/\D/g, "");
@@ -178,7 +176,7 @@ async function createOrder(opts: {
       ? { variant_id: opts.variantId, quantity: opts.quantity }
       : {
           product_id: opts.productId,
-          design: frontDesign(opts.designId),
+          design: frontDesign(opts.designId, opts.product.print),
           quantity: opts.quantity,
         };
 
@@ -186,7 +184,11 @@ async function createOrder(opts: {
     method: "POST",
     json: {
       reference_number: opts.reference,
-      retail_price: settings.printrove.retailPrice,
+      // Still a plain rupee number, not actual paise/cents, despite the
+      // Order.unitPriceCents field name it ends up in — same unit the
+      // codebase has always used here; a real cents conversion is a
+      // pricing/invoicing-phase concern, not a category-config one.
+      retail_price: opts.product.retailPrice,
       cod: opts.cod,
       customer: {
         name: c.name,
@@ -394,8 +396,20 @@ export async function getProductWithVariants(productId: number): Promise<Printro
   return data.data;
 }
 
-/** Resolve a customer's color/size choice to a Printrove base variant id using the API. */
-async function resolveVariantIdDynamically(productId: number, color: string, size: string): Promise<number> {
+/**
+ * Resolve a customer's color/size choice to a Printrove base variant id
+ * using the API. Attribute ids are assigned per-product by Printrove (not
+ * globally — verified live: Men's uses 1=Size/2=Color, Women's 5=Size/6=Color,
+ * Toddler 12=Size/11=Color, Kids 14=Size/13=Color), so the caller must pass
+ * the specific category's attribute ids rather than assuming 1/2.
+ */
+async function resolveVariantIdDynamically(
+  productId: number,
+  color: string,
+  size: string,
+  sizeAttrId: number,
+  colorAttrId: number
+): Promise<number> {
   const product = await getProductWithVariants(productId);
   if (!product.children || product.children.length === 0) {
     throw new Error(`Printrove product ${productId} has no variants (children).`);
@@ -409,11 +423,10 @@ async function resolveVariantIdDynamically(productId: number, color: string, siz
     let matchSize = false;
 
     for (const attr of attrs) {
-      // Attribute 1 = Size, 2 = Color (common for Printrove T-shirts)
-      if (attr.product_attribute_id === 1 && attr.value.toLowerCase() === size.toLowerCase()) {
+      if (attr.product_attribute_id === sizeAttrId && attr.value.toLowerCase() === size.toLowerCase()) {
         matchSize = true;
       }
-      if (attr.product_attribute_id === 2 && attr.value.toLowerCase() === color.toLowerCase()) {
+      if (attr.product_attribute_id === colorAttrId && attr.value.toLowerCase() === color.toLowerCase()) {
         matchColor = true;
       }
     }
@@ -427,51 +440,41 @@ async function resolveVariantIdDynamically(productId: number, color: string, siz
 }
 
 // ── Provider interface ───────────────────────────────────────────────────────
-function options(): VariantOptions {
-  const keys = Object.keys(settings.printrove.variantMap);
-  let sizes = [...settings.printrove.sizes];
-  let colors = [...settings.printrove.colors];
-
-  // When a variant map is configured, offer exactly those color/size combos.
-  if (keys.length) {
-    const sizeSet = new Set<string>();
-    const colorSet = new Set<string>();
-    for (const k of keys) {
-      const [color, size] = k.split("|");
-      if (color) colorSet.add(color);
-      if (size) sizeSet.add(size);
-    }
-    colors = [...colorSet];
-    sizes = [...sizeSet];
+function options(category?: string): VariantOptions {
+  const product = printroveProduct(category);
+  const keys = Object.keys(product.variantMap);
+  const sizeSet = new Set<string>();
+  const colorSet = new Set<string>();
+  for (const k of keys) {
+    const [color, size] = k.split("|");
+    if (color) colorSet.add(color);
+    if (size) sizeSet.add(size);
   }
 
   return {
     provider: "printrove",
-    sizes,
-    colors,
+    sizes: [...sizeSet],
+    colors: [...colorSet],
     countries: [...settings.printrove.countries],
   };
 }
 
 export async function fulfill(input: FulfillInput): Promise<FulfillResult> {
-  const baseProductId =
-    settings.printrove.productSubtypeId || settings.printrove.productId;
-
-  if (!baseProductId)
-    throw new Error(
-      "PRINTROVE_PRODUCT_SUBTYPE_ID or PRINTROVE_PRODUCT_ID is not set — provide the base product (the blank you print on)."
-    );
+  const product = printroveProduct(input.category);
 
   const baseVariantId = await resolveVariantIdDynamically(
-    baseProductId,
+    product.subtypeId,
     input.variant.color,
-    input.variant.size
+    input.variant.size,
+    product.sizeAttrId,
+    product.colorAttrId
   );
   const designId = await uploadDesign(input.designFileName, input.designBase64);
   const { productId, variantId } = await createProduct({
     name: input.title,
     designId,
     baseVariantId,
+    product,
   });
 
   let orderId: string | null = null;
@@ -486,6 +489,7 @@ export async function fulfill(input: FulfillInput): Promise<FulfillResult> {
       quantity: input.quantity,
       cod: input.cod,
       customer: input.customer,
+      product,
     });
     orderId = res.orderId;
     trackingNumber = res.trackingNumber;

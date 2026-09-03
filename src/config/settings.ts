@@ -20,25 +20,6 @@ const list = (v: string | undefined, fallback: string[]) =>
     ? v.split(",").map((s) => s.trim()).filter(Boolean)
     : fallback;
 
-/** Parse a JSON object env var into a { "Color|Size": variantId } number map. */
-const jsonMap = (v: string | undefined): Record<string, number> => {
-  if (!v) return {};
-  try {
-    // Strip over-escaped backslashes (e.g. {\"Key\":1} → {"Key":1}) that arise
-    // when someone uses \" inside single-quoted .env values unnecessarily.
-    const json = v.includes('\\"') ? v.replace(/\\"/g, '"') : v;
-    const obj = JSON.parse(json) as Record<string, unknown>;
-    const out: Record<string, number> = {};
-    for (const [k, val] of Object.entries(obj)) {
-      const n = Number(val);
-      if (!Number.isNaN(n)) out[k] = n;
-    }
-    return out;
-  } catch {
-    return {};
-  }
-};
-
 export const settings = {
   /** How many t-shirt options to generate per keyword. (You chose 5.) */
   optionsPerKeyword: num(process.env.OPTIONS_PER_KEYWORD, 5),
@@ -102,23 +83,6 @@ export const settings = {
   },
 
   printrove: {
-    /** Base product id from Printrove's catalog — the blank you print on ("default model"). */
-    productId: num(process.env.PRINTROVE_PRODUCT_ID, 0),
-    /** Specific product subtype id (e.g. Round Neck T-Shirt) from Printrove's catalog. */
-    productSubtypeId: num(process.env.PRINTROVE_PRODUCT_SUBTYPE_ID, 0),
-    /** Sizes offered in checkout (fallback when no variant map is set). */
-    sizes: list(process.env.PRINTROVE_SIZES, ["S", "M", "L", "XL", "2XL"]),
-    /** Colors offered in checkout (fallback when no variant map is set). */
-    colors: list(process.env.PRINTROVE_COLORS, ["Black"]),
-    /**
-     * Maps "Color|Size" -> Printrove base variant id, e.g.
-     *   PRINTROVE_VARIANT_MAP='{"Black|M":123,"Black|L":124}'
-     * Required to turn a customer's size/color choice into a printable variant.
-     * When provided, the checkout offers exactly these color/size combinations.
-     */
-    variantMap: jsonMap(process.env.PRINTROVE_VARIANT_MAP),
-    /** Retail price for the COD invoice, in your store currency (e.g. INR rupees). */
-    retailPrice: num(process.env.PRINTROVE_RETAIL_PRICE, 799),
     /** Default new orders to Cash-on-Delivery. */
     cod: bool(process.env.PRINTROVE_COD, true),
     /** Countries offered in the checkout address form. */
@@ -128,23 +92,94 @@ export const settings = {
       "United Kingdom",
       "Canada",
       "Australia",
-    ]), /**
-     * Front-print placement, in Printrove's design-canvas coordinate space
-     * (10x the base product's front_print_width/height — e.g. product 460's
-     * 468x588 print area gives a 4680x5880 frame). width/height is the design
-     * bounding box; top/left is its offset within that frame. To re-center
-     * for a different base product, fetch its front_print_width/height via
-     * getProductWithVariants() and solve: left = (width*10 - boxWidth) / 2,
-     * top = (height*10 - boxHeight) / 2. See scripts/test-printrove-centering.ts.
-     * Defaults below are centered for product 460 (Half Sleeve Round Neck Tee).
+    ]),
+    /**
+     * The only garment categories we generate designs for and sell — half
+     * sleeve, black only, capped at each product's flat-cost size tier (see
+     * the business_base_price jump per size in Printrove's catalog; adding a
+     * larger/older size back in means adding it here once its cost is priced
+     * in, not just extending `variantMap`). Every id below (subtypeId,
+     * sizeAttrId, colorAttrId, and each variantMap entry) was read live from
+     * Printrove's catalog API — attribute ids are assigned per-product, NOT
+     * globally (1/2 only happens to hold for Men's), so don't assume a
+     * shared Size/Color attribute id when adding a category.
+     *
+     * print geometry: Printrove's design-canvas coordinate space is 10x the
+     * product's front_print_width/height ("frame"). Men's/Women's/Kids all
+     * have a frame bigger than the 3000x3000 design box in both dimensions,
+     * so they use the documented centering recipe (left = (frameWidth -
+     * boxWidth)/2, top = (frameHeight - boxHeight)/2 — see
+     * scripts/test-printrove-centering.ts). Toddler's frame (2100x2340) is
+     * SMALLER than that box, so its box had to shrink too — verified by
+     * rendering live mockups at a couple of candidate sizes and eyeballing
+     * placement, not computed from the formula alone.
      */
-    print: {
-      width: num(process.env.PRINTROVE_PRINT_WIDTH, 3000),
-      height: num(process.env.PRINTROVE_PRINT_HEIGHT, 3000),
-      top: num(process.env.PRINTROVE_PRINT_TOP, 1440),
-      left: num(process.env.PRINTROVE_PRINT_LEFT, 840),
-    },
+    products: [
+      {
+        category: "men",
+        categoryLabel: "Men's Clothing",
+        productLabel: "Half Sleeve Round Neck T-Shirt",
+        subtypeId: 460,
+        sizeAttrId: 1,
+        colorAttrId: 2,
+        // Capped at S–XL — cost jumps 165 -> 180/200/220/230 at 2XL–5XL.
+        variantMap: { "Black|S": 269, "Black|M": 270, "Black|L": 271, "Black|XL": 272 } as Record<string, number>,
+        print: { width: 3000, height: 3000, top: 1440, left: 840 },
+        retailPrice: num(process.env.PRINTROVE_RETAIL_PRICE_MEN, 599),
+        enabled: true,
+      },
+      {
+        category: "women",
+        categoryLabel: "Women's Clothing",
+        productLabel: "Women's Half Sleeve Round Neck T-Shirt",
+        subtypeId: 462,
+        sizeAttrId: 5,
+        colorAttrId: 6,
+        // Capped at XS–XL — cost jumps 155 -> 165/180/200/220 at 2XL–5XL.
+        variantMap: { "Black|XS": 335, "Black|S": 333, "Black|M": 332, "Black|L": 331, "Black|XL": 334 } as Record<string, number>,
+        print: { width: 3000, height: 3000, top: 675, left: 240 },
+        retailPrice: num(process.env.PRINTROVE_RETAIL_PRICE_WOMEN, 599),
+        enabled: true,
+      },
+      {
+        category: "toddler",
+        categoryLabel: "Kid's Clothing — Toddler",
+        productLabel: "Toddler Half Sleeve Round Neck T-Shirt",
+        subtypeId: 560,
+        sizeAttrId: 12,
+        colorAttrId: 11,
+        // Sizes are ages, not S/M/L. Capped at 1–4 — cost jumps 130 -> 150 at age 6.
+        variantMap: { "Black|1": 636, "Black|2": 644, "Black|3": 652, "Black|4": 660 } as Record<string, number>,
+        print: { width: 1800, height: 1800, top: 270, left: 150 },
+        retailPrice: num(process.env.PRINTROVE_RETAIL_PRICE_TODDLER, 599),
+        enabled: true,
+      },
+      {
+        category: "kids",
+        categoryLabel: "Kid's Clothing — Kids",
+        productLabel: "Kids Half Sleeve Round Neck T-Shirt",
+        subtypeId: 561,
+        sizeAttrId: 14,
+        colorAttrId: 13,
+        // Sizes are ages, not S/M/L. Flat cost (150) across the offered range — no cap needed.
+        variantMap: { "Black|8": 676, "Black|10": 684, "Black|12": 692, "Black|14": 700 } as Record<string, number>,
+        print: { width: 3000, height: 3000, top: 675, left: 240 },
+        retailPrice: num(process.env.PRINTROVE_RETAIL_PRICE_KIDS, 599),
+        enabled: true,
+      },
+    ],
   },
 } as const;
+
+export type PrintroveProductConfig = (typeof settings)["printrove"]["products"][number];
+
+/** Look up a supported category's product config, falling back to "men". */
+export function printroveProduct(category?: string | null): PrintroveProductConfig {
+  const products = settings.printrove.products;
+  return (
+    products.find((p) => p.category === category && p.enabled) ??
+    products.find((p) => p.category === "men")!
+  );
+}
 
 export type Settings = typeof settings;
