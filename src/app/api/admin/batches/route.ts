@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requireAdmin } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
 // Admin queue feed. ?status=pending (default) filters to items awaiting approval.
 export async function GET(req: Request) {
+  const denied = await requireAdmin(req);
+  if (denied) return denied;
+
   const url = new URL(req.url);
   const status = url.searchParams.get("status");
 

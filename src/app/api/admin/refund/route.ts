@@ -5,6 +5,7 @@ import { getRazorpayClient } from "@/lib/razorpay";
 import { enqueueEmail } from "@/lib/tasks";
 import { refundProcessedEmail } from "@/lib/email";
 import { logger } from "@/lib/logger";
+import { requireAdmin } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
@@ -16,6 +17,9 @@ const Body = z.object({ orderId: z.string().min(1), reason: z.string().max(300).
 // moved, so it has to be given back explicitly rather than just marking the
 // order failed and walking away.
 export async function POST(req: Request) {
+  const denied = await requireAdmin(req);
+  if (denied) return denied;
+
   let body: z.infer<typeof Body>;
   try {
     body = Body.parse(await req.json());

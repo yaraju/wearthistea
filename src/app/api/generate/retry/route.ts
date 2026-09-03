@@ -6,6 +6,7 @@ import type { Concept } from "@/config/prompts";
 import { compositeOnTee } from "@/lib/mockup";
 import { saveImage } from "@/lib/storage";
 import { settings } from "@/config/settings";
+import { checkGenerateRateLimit, setRateLimitCookie } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -15,11 +16,25 @@ const Body = z.object({
 });
 
 export async function POST(req: Request) {
+  // Same budget pool as /api/generate and /api/realize — this route also
+  // triggers a full paid image render.
+  const rateLimit = await checkGenerateRateLimit(req);
+  if (!rateLimit.ok) {
+    const res = NextResponse.json(
+      { error: "You've hit the free-generation limit for now — try again in a bit." },
+      { status: 429 }
+    );
+    setRateLimitCookie(res, rateLimit);
+    return res;
+  }
+
   let body;
   try {
     body = Body.parse(await req.json());
   } catch {
-    return NextResponse.json({ error: "Missing designId." }, { status: 400 });
+    const res = NextResponse.json({ error: "Missing designId." }, { status: 400 });
+    setRateLimitCookie(res, rateLimit);
+    return res;
   }
 
   const { designId } = body;
@@ -80,7 +95,9 @@ export async function POST(req: Request) {
       },
     });
 
-    return NextResponse.json({ design: updated });
+    const res = NextResponse.json({ design: updated });
+    setRateLimitCookie(res, rateLimit);
+    return res;
   } catch (err) {
     const message = err instanceof Error ? err.message : "Retry failed.";
     // Best-effort: this route is now also the initial-render path (not just
@@ -89,6 +106,8 @@ export async function POST(req: Request) {
     await prisma.design
       .update({ where: { id: designId }, data: { status: "failed", errorMessage: message } })
       .catch(() => {});
-    return NextResponse.json({ error: message }, { status: 500 });
+    const res = NextResponse.json({ error: message }, { status: 500 });
+    setRateLimitCookie(res, rateLimit);
+    return res;
   }
 }

@@ -11,13 +11,54 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import type { OrderDTO } from "@/lib/types";
+import AdminLogin from "@/components/AdminLogin";
 
 type Row = OrderDTO;
 
 const FILTERS = ["pending", "published", "rejected", "failed", "all"] as const;
 type Filter = (typeof FILTERS)[number];
 
+// Gate: this page still sits behind sitewide Basic Auth (proxy.ts) in
+// production, but that's a shared secret, not "you specifically" — this
+// checks for a Firebase session belonging to the admin account before
+// rendering the queue. The real enforcement is server-side (every
+// /api/admin/* route calls requireAdmin()); this is just so an unsigned-in
+// visitor sees a sign-in form instead of a broken, empty queue.
 export default function AdminPage() {
+  const [authChecked, setAuthChecked] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  const checkAuth = useCallback(async () => {
+    try {
+      const res = await fetch("/api/auth/me", { cache: "no-store" });
+      const data = await res.json().catch(() => ({}));
+      setIsAdmin(Boolean(data.isAdmin));
+    } catch {
+      setIsAdmin(false);
+    } finally {
+      setAuthChecked(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    checkAuth();
+  }, [checkAuth]);
+
+  if (!authChecked) {
+    return (
+      <div className="grid min-h-screen place-items-center font-mono text-sm text-ink-soft">
+        loading…
+      </div>
+    );
+  }
+  if (!isAdmin) {
+    return <AdminLogin onSignedIn={checkAuth} />;
+  }
+  return <AdminQueue onSignOut={() => setIsAdmin(false)} />;
+}
+
+function AdminQueue({ onSignOut }: { onSignOut: () => void }) {
   const [filter, setFilter] = useState<Filter>("pending");
   const [rows, setRows] = useState<Row[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
@@ -65,12 +106,23 @@ export default function AdminPage() {
             </Link>
             <h1 className="kicker mt-1 text-paper/60">drop queue · phase 1</h1>
           </div>
-          <button
-            onClick={load}
-            className="inline-flex cursor-pointer items-center gap-2 rounded-full border-2 border-paper px-4 py-2 font-mono text-xs uppercase tracking-wider transition-colors duration-200 hover:bg-paper hover:text-ink"
-          >
-            <RefreshCw className="h-3.5 w-3.5" aria-hidden /> Refresh
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={load}
+              className="inline-flex cursor-pointer items-center gap-2 rounded-full border-2 border-paper px-4 py-2 font-mono text-xs uppercase tracking-wider transition-colors duration-200 hover:bg-paper hover:text-ink"
+            >
+              <RefreshCw className="h-3.5 w-3.5" aria-hidden /> Refresh
+            </button>
+            <button
+              onClick={async () => {
+                await fetch("/api/auth/logout", { method: "POST" });
+                onSignOut();
+              }}
+              className="inline-flex cursor-pointer items-center gap-2 rounded-full border-2 border-paper px-4 py-2 font-mono text-xs uppercase tracking-wider transition-colors duration-200 hover:bg-paper hover:text-ink"
+            >
+              Sign out
+            </button>
+          </div>
         </div>
       </header>
 

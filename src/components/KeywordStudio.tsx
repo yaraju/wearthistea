@@ -782,10 +782,11 @@ function DesignCard({
                   <input
                     id="email"
                     name="email"
+                    required
                     aria-label="Email"
                     type="email"
                     autoComplete="email"
-                    placeholder="Email (optional)"
+                    placeholder="Email"
                     value={form.email}
                     onChange={set("email")}
                     className={FIELD_CLS}

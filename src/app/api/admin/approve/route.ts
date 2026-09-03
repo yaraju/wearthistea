@@ -7,6 +7,7 @@ import { settings, printroveProduct } from "@/config/settings";
 import { enqueueEmail } from "@/lib/tasks";
 import { shippedEmail } from "@/lib/email";
 import { logger } from "@/lib/logger";
+import { requireAdmin } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -17,6 +18,9 @@ const Body = z.object({ orderId: z.string().min(1) });
 //   Printrove: upload design → create product → place a (COD) order.
 //   Printify:  upload design → create product → publish to the sales channel.
 export async function POST(req: Request) {
+  const denied = await requireAdmin(req);
+  if (denied) return denied;
+
   let orderId: string;
   try {
     orderId = Body.parse(await req.json()).orderId;

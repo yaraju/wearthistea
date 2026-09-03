@@ -7,6 +7,7 @@ import { settings } from "@/config/settings";
 import { prompts } from "@/config/prompts";
 import { langfuse, getTraceId } from "@/lib/langfuse";
 import { logger } from "@/lib/logger";
+import { checkGenerateRateLimit, setRateLimitCookie } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -35,14 +36,26 @@ function resolveCategory(productId?: number): string {
 
 // Health check and main generation logic
 export async function POST(req: Request) {
+  const rateLimit = await checkGenerateRateLimit(req);
+  if (!rateLimit.ok) {
+    const res = NextResponse.json(
+      { error: "You've hit the free-generation limit for now — try again in a bit." },
+      { status: 429 }
+    );
+    setRateLimitCookie(res, rateLimit);
+    return res;
+  }
+
   let body;
   try {
     body = Body.parse(await req.json());
   } catch {
-    return NextResponse.json(
+    const res = NextResponse.json(
       { error: "Spill something first — give us 2–280 characters of tea." },
       { status: 400 }
     );
+    setRateLimitCookie(res, rateLimit);
+    return res;
   }
 
   const { keyword, category, productType, color, style } = body;
@@ -124,12 +137,14 @@ export async function POST(req: Request) {
       count: designs.length,
     });
 
-    return NextResponse.json({
+    const res = NextResponse.json({
       batchId: batch.id,
       keyword,
       designs,
       options: getProvider().options(resolvedCategory),
     });
+    setRateLimitCookie(res, rateLimit);
+    return res;
   } catch (err) {
     const message = err instanceof Error ? err.message : "Generation failed.";
     trace.update({
@@ -140,6 +155,8 @@ export async function POST(req: Request) {
       traceId,
       error: err,
     });
-    return NextResponse.json({ error: message }, { status: 500 });
+    const res = NextResponse.json({ error: message }, { status: 500 });
+    setRateLimitCookie(res, rateLimit);
+    return res;
   }
 }

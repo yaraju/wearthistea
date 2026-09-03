@@ -9,7 +9,10 @@ export const runtime = "nodejs";
 
 const Customer = z.object({
   name: z.string().trim().min(1).max(120),
-  email: z.string().trim().email().max(160).optional().or(z.literal("")),
+  // Mandatory (Phase 6): this is the email a magic-link sign-in is sent to
+  // at checkout, and every order needs somewhere to send its GST invoice /
+  // shipping updates — see src/lib/auth.ts.
+  email: z.string().trim().email().max(160),
   phone: z.string().trim().min(5).max(20),
   address1: z.string().trim().min(1).max(200),
   address2: z.string().trim().max(200).optional().or(z.literal("")),
