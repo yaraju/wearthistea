@@ -3,12 +3,13 @@
 import { initializeApp, getApps, type FirebaseOptions } from "firebase/app";
 import { getAuth, type Auth } from "firebase/auth";
 
+// `||`, not `??`: an unset GitHub Actions secret comes through the
+// build-arg chain as an empty string, not undefined — `??` wouldn't catch it.
 const config: FirebaseOptions = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  authDomain:
-    process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN ?? "wearthistea.firebaseapp.com",
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ?? "wearthistea",
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || undefined,
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "wearthistea.firebaseapp.com",
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "wearthistea",
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || undefined,
 };
 
 let cachedAuth: Auth | null = null;

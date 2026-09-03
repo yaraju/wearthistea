@@ -2,9 +2,14 @@ import { getApps, initializeApp } from "firebase-admin/app";
 import { getAuth, type DecodedIdToken } from "firebase-admin/auth";
 import { NextResponse } from "next/server";
 
-// The one account allowed into /admin and /api/admin/*. Not a general
-// allowlist — this business has exactly one admin.
-const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || "yaraju@gmail.com").toLowerCase();
+// The accounts allowed into /admin and /api/admin/* — comma-separated.
+// Firebase Auth is also configured for email/password and email link, but
+// admin access specifically requires signing in with Google (see
+// isAdminEmail below) at one of these addresses.
+const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "yaraju@gmail.com,wearthistea@gmail.com")
+  .split(",")
+  .map((e) => e.trim().toLowerCase())
+  .filter(Boolean);
 
 export const SESSION_COOKIE = "wt_session";
 // Firebase's own hard cap on session cookie lifetime.
@@ -24,6 +29,11 @@ function auth() {
   return getAuth(adminApp());
 }
 
+/** Decode + verify a freshly-signed-in client ID token (not a session cookie). */
+export async function verifyIdToken(idToken: string): Promise<DecodedIdToken> {
+  return auth().verifyIdToken(idToken);
+}
+
 /** Exchange a freshly-signed-in client ID token for a long-lived session cookie. */
 export async function createSessionCookie(idToken: string): Promise<string> {
   return auth().createSessionCookie(idToken, { expiresIn: SESSION_MAX_AGE_MS });
@@ -38,8 +48,21 @@ export async function verifySession(sessionCookie: string): Promise<DecodedIdTok
   }
 }
 
-export function isAdminEmail(email?: string | null): boolean {
-  return Boolean(email) && email!.toLowerCase() === ADMIN_EMAIL;
+function isAllowedAdminEmail(email?: string | null): boolean {
+  return Boolean(email) && ADMIN_EMAILS.includes(email!.toLowerCase());
+}
+
+/**
+ * Admin sign-in must be via Google specifically (not the email/password or
+ * email-link methods also enabled on this Firebase project) — the user's
+ * explicit call, since only they control those two Google accounts.
+ */
+function signedInWithGoogle(decoded: DecodedIdToken): boolean {
+  return decoded.firebase?.sign_in_provider === "google.com";
+}
+
+export function isAdminToken(decoded: DecodedIdToken): boolean {
+  return Boolean(decoded.email_verified) && isAllowedAdminEmail(decoded.email) && signedInWithGoogle(decoded);
 }
 
 /** Decode + admin-check the session cookie on an incoming request, or null. */
@@ -47,7 +70,7 @@ export async function getAdminSession(req: Request): Promise<DecodedIdToken | nu
   const cookie = readCookie(req, SESSION_COOKIE);
   if (!cookie) return null;
   const decoded = await verifySession(cookie);
-  if (!decoded || !decoded.email_verified || !isAdminEmail(decoded.email)) return null;
+  if (!decoded || !isAdminToken(decoded)) return null;
   return decoded;
 }
 

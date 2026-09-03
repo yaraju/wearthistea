@@ -48,21 +48,22 @@ jobs:
         shell: bash
         env:
           VARIANT_MAP: ${{ secrets.PRINTROVE_VARIANT_MAP }}
-          AUTH_USER: ${{ secrets.BASIC_AUTH_USER }}
-          AUTH_PASS: ${{ secrets.BASIC_AUTH_PASSWORD }}
         run: |
           # Clean variables: remove newlines and optional surrounding quotes
           clean_var() {
             tr -d '\n\r' | sed "s/^ *//;s/ *$//;s/^'//;s/'$//;s/^\"//;s/\"$//;"
           }
-          
+
           echo "variant_map=$(echo "$VARIANT_MAP" | clean_var)" >> $GITHUB_OUTPUT
-          echo "auth_user=$(echo "$AUTH_USER" | clean_var)" >> $GITHUB_OUTPUT
-          echo "auth_pass=$(echo "$AUTH_PASS" | clean_var)" >> $GITHUB_OUTPUT
 
       - name: Build and Push Container
         run: |-
-          docker build -t "${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE_NAME }}:${{ github.sha }}" .
+          docker build \
+            --build-arg NEXT_PUBLIC_FIREBASE_API_KEY="${{ secrets.NEXT_PUBLIC_FIREBASE_API_KEY }}" \
+            --build-arg NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN="${{ secrets.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN }}" \
+            --build-arg NEXT_PUBLIC_FIREBASE_PROJECT_ID="${{ secrets.NEXT_PUBLIC_FIREBASE_PROJECT_ID }}" \
+            --build-arg NEXT_PUBLIC_FIREBASE_APP_ID="${{ secrets.NEXT_PUBLIC_FIREBASE_APP_ID }}" \
+            -t "${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE_NAME }}:${{ github.sha }}" .
           docker push "${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE_NAME }}:${{ github.sha }}"
 
       - name: Deploy to Cloud Run
@@ -91,12 +92,31 @@ jobs:
             PRINTROVE_PRODUCT_ID=${{ secrets.PRINTROVE_PRODUCT_ID }}
             PRINTROVE_PRODUCT_SUBTYPE_ID=${{ secrets.PRINTROVE_PRODUCT_SUBTYPE_ID }}
             PRINTROVE_VARIANT_MAP=${{ steps.prep.outputs.variant_map }}
-            BASIC_AUTH_USER=${{ steps.prep.outputs.auth_user }}
-            BASIC_AUTH_PASSWORD=${{ steps.prep.outputs.auth_pass }}
             NEXT_PUBLIC_LANGFUSE_PUBLIC_KEY=${{ secrets.NEXT_PUBLIC_LANGFUSE_PUBLIC_KEY }}
             LANGFUSE_SECRET_KEY=${{ secrets.LANGFUSE_SECRET_KEY }}
             LANGFUSE_BASEURL=${{ secrets.LANGFUSE_BASEURL }}
+            ADMIN_EMAILS=${{ secrets.ADMIN_EMAILS }}
+            RAZORPAY_KEY_ID=${{ secrets.RAZORPAY_KEY_ID }}
+            RAZORPAY_KEY_SECRET=${{ secrets.RAZORPAY_KEY_SECRET }}
+            RAZORPAY_WEBHOOK_SECRET=${{ secrets.RAZORPAY_WEBHOOK_SECRET }}
+            SENDGRID_API_KEY=${{ secrets.SENDGRID_API_KEY }}
+            EMAIL_FROM=${{ secrets.EMAIL_FROM }}
+            CLOUD_TASKS_QUEUE=${{ secrets.CLOUD_TASKS_QUEUE }}
+            GCP_PROJECT_ID=${{ env.PROJECT_ID }}
+            GCP_REGION=${{ env.REGION }}
+            SITE_URL=${{ secrets.SITE_URL }}
+            TASKS_SHARED_SECRET=${{ secrets.TASKS_SHARED_SECRET }}
+            SELLER_BUSINESS_NAME=${{ secrets.SELLER_BUSINESS_NAME }}
+            SELLER_GSTIN=${{ secrets.SELLER_GSTIN }}
+            SELLER_ADDRESS=${{ secrets.SELLER_ADDRESS }}
+            SELLER_STATE=${{ secrets.SELLER_STATE }}
           env_vars_update_strategy: overwrite
+          # BASIC_AUTH_USER/PASSWORD deliberately not set here — Razorpay's
+          # onboarding needs the site reachable without a password prompt.
+          # /admin and /api/admin/* are protected independently by the
+          # Firebase Google-sign-in gate (src/lib/auth.ts). To turn Basic
+          # Auth back on later, add BASIC_AUTH_USER/BASIC_AUTH_PASSWORD back
+          # to this list, sourced from repo secrets of the same name.
 
       - name: Deploy to Firebase Hosting
         run: |
