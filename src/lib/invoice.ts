@@ -2,15 +2,11 @@ import PDFDocument from "pdfkit";
 import { prisma } from "./prisma";
 import { saveFile } from "./storage";
 import { settings } from "@/config/settings";
+import { computeGst, type GstBreakdown } from "./gst";
 
 // Knitted cotton/blend t-shirts — the only thing we sell, so this is fixed
 // rather than looked up per category.
 const HSN_CODE = "6109";
-
-/** Post-GST-2.0 (Sept 2025) apparel slab: 5% at/under ₹2,500/piece, 18% above. */
-function gstRateFor(unitPrice: number): number {
-  return unitPrice <= 2500 ? 0.05 : 0.18;
-}
 
 function financialYear(d: Date): string {
   const y = d.getFullYear();
@@ -29,48 +25,6 @@ async function nextInvoiceNumber(date: Date): Promise<string> {
     update: { value: { increment: 1 } },
   });
   return `INV-${financialYear(date)}-${String(counter.value).padStart(6, "0")}`;
-}
-
-interface GstBreakdown {
-  unitPrice: number;
-  quantity: number;
-  totalInclusive: number;
-  taxableValue: number;
-  gstRate: number;
-  gstAmount: number;
-  /** true = buyer and seller are in the same state (CGST+SGST); false = IGST. */
-  intraState: boolean;
-  cgst: number;
-  sgst: number;
-  igst: number;
-}
-
-function computeGst(unitPrice: number, quantity: number, buyerState: string | null): GstBreakdown {
-  const gstRate = gstRateFor(unitPrice);
-  const totalInclusive = unitPrice * quantity;
-  // GST-inclusive price: taxable value is back-calculated, not added on top.
-  const taxableValue = totalInclusive / (1 + gstRate);
-  const gstAmount = totalInclusive - taxableValue;
-
-  // Buyer state unknown: can't confirm place of supply, so this shouldn't
-  // silently guess intra-state (that's the branch that halves the rate per
-  // line — the wrong guess understates tax due). Treat as inter-state.
-  const intraState = Boolean(
-    buyerState && buyerState.trim().toLowerCase() === settings.seller.state.trim().toLowerCase()
-  );
-
-  return {
-    unitPrice,
-    quantity,
-    totalInclusive,
-    taxableValue,
-    gstRate,
-    gstAmount,
-    intraState,
-    cgst: intraState ? gstAmount / 2 : 0,
-    sgst: intraState ? gstAmount / 2 : 0,
-    igst: intraState ? 0 : gstAmount,
-  };
 }
 
 function rupees(n: number): string {
@@ -202,7 +156,7 @@ export async function generateInvoice(orderId: string): Promise<{ invoiceNumber:
 
   const unitPrice = order.unitPriceCents ?? 0;
   const quantity = order.quantity ?? 1;
-  const breakdown = computeGst(unitPrice, quantity, order.state);
+  const breakdown = computeGst(unitPrice, quantity, order.state, settings.seller.state);
 
   const invoiceDate = new Date();
   const invoiceNumber = await nextInvoiceNumber(invoiceDate);

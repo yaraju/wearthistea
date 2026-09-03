@@ -195,7 +195,11 @@ async function createOrder(opts: {
         ...(c.email ? { email: c.email } : {}),
         number: phoneDigits ? Number(phoneDigits) : phoneDigits,
         address1: c.address1,
-        address2: c.address2 || "-",
+        // Omit when blank rather than sending a "-" placeholder — verified
+        // live against Printrove's API: it now rejects address2 shorter
+        // than 3 characters ("must be between 3 and 55 characters"), so the
+        // old placeholder made every order with no address line 2 fail.
+        ...(c.address2 ? { address2: c.address2 } : {}),
         ...(c.address3 ? { address3: c.address3 } : {}),
         ...(c.city ? { city: c.city } : {}),
         ...(c.state ? { state: c.state } : {}),

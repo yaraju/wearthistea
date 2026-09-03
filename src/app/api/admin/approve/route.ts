@@ -28,6 +28,23 @@ export async function POST(req: Request) {
   if (!order)
     return NextResponse.json({ error: "Order not found." }, { status: 404 });
 
+  // Already pushed to the provider — don't place a second Printrove order
+  // for the same Order (a double-click, or a retried request, shouldn't
+  // double-charge the wallet or double-ship).
+  if (order.printroveOrderId || order.status === "published") {
+    return NextResponse.json({ ok: true, order });
+  }
+
+  // A prepaid order that hasn't actually been paid yet has nothing to ship
+  // for — COD orders skip this check since nothing is ever "paid" on our
+  // side for them.
+  if (order.paymentProvider === "razorpay" && order.paymentStatus !== "paid") {
+    return NextResponse.json(
+      { error: "This order hasn't been paid yet — nothing to approve." },
+      { status: 409 }
+    );
+  }
+
   const design = order.design;
   const printPath = design.designImagePath || design.productImagePath;
   if (!printPath)
@@ -52,10 +69,14 @@ export async function POST(req: Request) {
       );
   }
 
+  // Prefer the price already locked in at order-creation time (what the
+  // customer actually agreed to / was charged) over recomputing from
+  // current settings, which may have changed since.
   const priceCents =
-    provider.name === "printify"
+    order.unitPriceCents ??
+    (provider.name === "printify"
       ? settings.printify.priceCents
-      : printroveProduct(order.productCategory).retailPrice;
+      : printroveProduct(order.productCategory).retailPrice);
 
   try {
     let designBase64: string;

@@ -37,6 +37,7 @@ export interface OrderDTO {
   variantColor: string | null;
   quantity: number;
   cod: boolean;
+  paymentProvider: string;
   paymentStatus: string;
 
   recipientName: string | null;

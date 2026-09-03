@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { settings, printroveProduct } from "@/config/settings";
 import { realizeDesign } from "@/lib/realize";
+import { computeGst } from "@/lib/gst";
 
 export const runtime = "nodejs";
 
@@ -24,12 +25,19 @@ const Body = z.object({
   color: z.string().trim().min(1).max(40),
   quantity: z.number().int().min(1).max(10).default(1),
   customer: Customer.optional(),
+  // "cod" (default): goes straight into the /admin approval queue, exactly
+  // today's behavior. "prepaid": the order is created but held out of the
+  // admin queue (status: pending_payment) until the customer completes
+  // Razorpay Checkout — see /api/orders/create — so nothing gets fulfilled
+  // (or shipped, or refund-owed) for money that hasn't actually arrived yet.
+  paymentMethod: z.enum(["cod", "prepaid"]).default("cod"),
 });
 
 // User picks a design on the landing page + fills in the checkout → this
 // creates a new Order for that design and puts it in the /admin approval
-// queue. One Design can end up with many Orders (different buyers, or the
-// same buyer retrying) — order/shipping state never lives on Design itself.
+// queue (immediately for COD; after payment for prepaid). One Design can
+// end up with many Orders (different buyers, or the same buyer retrying) —
+// order/shipping state never lives on Design itself.
 export async function POST(req: Request) {
   let body: z.infer<typeof Body>;
   try {
@@ -108,15 +116,29 @@ export async function POST(req: Request) {
   }
 
   const c = body.customer;
+  const prepaid = body.paymentMethod === "prepaid";
+
+  // Price the order now (not at approval time) — prepaid needs an amount to
+  // charge before approval ever happens, and pricing it up front (instead of
+  // whatever settings.printrove looks like whenever an admin eventually
+  // clicks approve) is what the customer actually agreed to pay.
+  const product = printroveProduct(design.category);
+  const gst = computeGst(product.retailPrice, body.quantity, c?.state || null, settings.seller.state);
+
   const order = await prisma.order.create({
     data: {
       designId: body.designId,
-      status: "pending",
+      status: prepaid ? "pending_payment" : "pending",
       productCategory: design.category,
       variantSize: body.size,
       variantColor: body.color,
       quantity: body.quantity,
-      cod: settings.printrove.cod,
+      unitPriceCents: product.retailPrice,
+      gstRateBps: Math.round(gst.gstRate * 10000),
+      gstAmountCents: Math.round(gst.gstAmount),
+      paymentProvider: prepaid ? "razorpay" : "cod",
+      paymentStatus: "unpaid",
+      cod: prepaid ? false : settings.printrove.cod,
       recipientName: c?.name ?? null,
       recipientEmail: c?.email || null,
       recipientPhone: c?.phone ?? null,

@@ -136,10 +136,10 @@ export default function AdminPage() {
 }
 
 function QueueCard({ row, onChange }: { row: Row; onChange: () => void }) {
-  const [busy, setBusy] = useState<null | "approve" | "reject" | "retry">(null);
+  const [busy, setBusy] = useState<null | "approve" | "reject" | "retry" | "refund">(null);
   const [err, setErr] = useState<string | null>(null);
 
-  async function act(kind: "approve" | "reject" | "retry") {
+  async function act(kind: "approve" | "reject" | "retry" | "refund") {
     setBusy(kind);
     setErr(null);
     try {
@@ -163,6 +163,12 @@ function QueueCard({ row, onChange }: { row: Row; onChange: () => void }) {
   const isPending = row.status === "pending";
   const isFailed = row.status === "failed";
   const hasArtwork = Boolean(row.hasImageData);
+  // Prepaid introduces a failure mode COD never had: money already moved,
+  // then fulfillment failed or you rejected it — offer to give it back.
+  const canRefund =
+    row.paymentProvider === "razorpay" &&
+    row.paymentStatus === "paid" &&
+    (row.status === "failed" || row.status === "rejected");
 
   return (
     <div className="sticker flex flex-col overflow-hidden rounded-2xl bg-paper-2">
@@ -223,7 +229,9 @@ function QueueCard({ row, onChange }: { row: Row; onChange: () => void }) {
             )}
             {row.recipientName && (
               <p className="uppercase tracking-wider text-tea">
-                {row.cod ? "Cash on delivery" : "Prepaid"}
+                {row.cod
+                  ? "Cash on delivery"
+                  : `Prepaid · ${row.paymentStatus === "paid" ? "paid" : "awaiting payment"}`}
               </p>
             )}
           </div>
@@ -297,6 +305,20 @@ function QueueCard({ row, onChange }: { row: Row; onChange: () => void }) {
               <>
                 <RefreshCw className="h-4 w-4" aria-hidden /> Retry &amp; print
               </>
+            )}
+          </button>
+        )}
+
+        {canRefund && (
+          <button
+            onClick={() => act("refund")}
+            disabled={busy !== null}
+            className="mt-2 inline-flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-pink px-3 py-2.5 font-mono text-xs font-bold uppercase tracking-wider text-pink-ink transition-transform duration-200 hover:-translate-y-0.5 disabled:opacity-50"
+          >
+            {busy === "refund" ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+            ) : (
+              "Refund"
             )}
           </button>
         )}

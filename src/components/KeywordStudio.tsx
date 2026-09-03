@@ -45,6 +45,29 @@ async function runWithConcurrency<T>(
   await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, run));
 }
 
+declare global {
+  interface Window {
+    Razorpay?: new (opts: Record<string, unknown>) => { open: () => void };
+  }
+}
+
+let razorpayScriptPromise: Promise<void> | null = null;
+
+/** Load Razorpay's Checkout script once, lazily — only visitors who
+ * actually choose "Pay Now" ever pull it in. */
+function loadRazorpayScript(): Promise<void> {
+  if (window.Razorpay) return Promise.resolve();
+  if (razorpayScriptPromise) return razorpayScriptPromise;
+  razorpayScriptPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://checkout.razorpay.com/v1/checkout.js";
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Could not load the payment form. Check your connection and try again."));
+    document.body.appendChild(script);
+  });
+  return razorpayScriptPromise;
+}
+
 /** Translate raw API errors into a one-line human reason. */
 function friendlyError(msg: string): string {
   if (/limit:\s*0|RESOURCE_EXHAUSTED|free_tier|quota|\b429\b/i.test(msg)) {
@@ -469,6 +492,10 @@ function DesignCard({
     pincode: "",
     country: options.countries[0] ?? "",
   });
+  // Prepaid cuts down on cash-on-delivery returns, so it's the default —
+  // COD stays available as a fallback for anyone who'd rather not pay online.
+  const [paymentMethod, setPaymentMethod] = useState<"prepaid" | "cod">("prepaid");
+  const [paid, setPaid] = useState(false);
 
   // Sync color when user selects a different color in the studio
   useEffect(() => {
@@ -490,12 +517,14 @@ function DesignCard({
     e.preventDefault();
     setBusy(true);
     setErr(null);
+    const wantsPrepaid = needsShipping && paymentMethod === "prepaid";
     try {
       const payload: Record<string, unknown> = {
         designId: design.id,
         size: form.size,
         color: form.color,
         quantity: Number(form.quantity) || 1,
+        paymentMethod: wantsPrepaid ? "prepaid" : "cod",
       };
       if (needsShipping) {
         payload.customer = {
@@ -517,6 +546,63 @@ function DesignCard({
       });
       const data = await parseJsonResponse(res);
       if (!res.ok) throw new Error(data.error ?? "Could not place this order.");
+
+      if (!wantsPrepaid) {
+        setStatus("pending");
+        setOpen(false);
+        return;
+      }
+
+      // Prepaid: open Razorpay Checkout against the order just created.
+      const orderId = data.order.id as string;
+      await loadRazorpayScript();
+      const createRes = await fetch("/api/orders/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId }),
+      });
+      const createData = await parseJsonResponse(createRes);
+      if (!createRes.ok) throw new Error(createData.error ?? "Could not start payment.");
+      if (!createData.keyId) throw new Error("Online payment isn't set up yet — try Cash on Delivery.");
+
+      await new Promise<void>((resolve, reject) => {
+        const rzp = new window.Razorpay!({
+          key: createData.keyId,
+          amount: createData.amountPaise,
+          currency: createData.currency,
+          order_id: createData.razorpayOrderId,
+          name: "wearthistea",
+          description: design.title,
+          prefill: { name: form.name, email: form.email, contact: form.phone },
+          handler: async (response: {
+            razorpay_order_id: string;
+            razorpay_payment_id: string;
+            razorpay_signature: string;
+          }) => {
+            try {
+              const verifyRes = await fetch("/api/orders/verify", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(response),
+              });
+              const verifyData = await parseJsonResponse(verifyRes);
+              if (!verifyRes.ok || !verifyData.ok) {
+                reject(new Error("Payment could not be verified. Contact us with your payment id."));
+                return;
+              }
+              resolve();
+            } catch {
+              reject(new Error("Payment could not be verified. Contact us with your payment id."));
+            }
+          },
+          modal: {
+            ondismiss: () => reject(new Error("Payment cancelled.")),
+          },
+        });
+        rzp.open();
+      });
+
+      setPaid(true);
       setStatus("pending");
       setOpen(false);
     } catch (e2) {
@@ -611,7 +697,8 @@ function DesignCard({
           </div>
         ) : queued ? (
           <p className="flex items-center gap-1.5 font-mono text-sm font-bold text-tea">
-            <Check className="h-4 w-4" aria-hidden /> sent to the drop queue
+            <Check className="h-4 w-4" aria-hidden />
+            {paid ? "payment received — sent to the drop queue" : "sent to the drop queue"}
           </p>
         ) : open ? (
           <form onSubmit={placeOrder} className="mt-1 space-y-2.5">
@@ -775,8 +862,32 @@ function DesignCard({
                     ))}
                   </select>
                 </div>
+                <div className="flex gap-3 pt-1">
+                  <label className="flex items-center gap-1.5 font-mono text-[11px] text-ink">
+                    <input
+                      type="radio"
+                      name="paymentMethod"
+                      value="prepaid"
+                      checked={paymentMethod === "prepaid"}
+                      onChange={() => setPaymentMethod("prepaid")}
+                    />
+                    Pay now
+                  </label>
+                  <label className="flex items-center gap-1.5 font-mono text-[11px] text-ink">
+                    <input
+                      type="radio"
+                      name="paymentMethod"
+                      value="cod"
+                      checked={paymentMethod === "cod"}
+                      onChange={() => setPaymentMethod("cod")}
+                    />
+                    Cash on delivery
+                  </label>
+                </div>
                 <p className="font-mono text-[10px] leading-relaxed text-ink-soft">
-                  Cash on delivery · we print &amp; ship after a quick review.
+                  {paymentMethod === "prepaid"
+                    ? "Pay online now — we print & ship after a quick review."
+                    : "Cash on delivery · we print & ship after a quick review."}
                 </p>
               </div>
             )}
@@ -791,7 +902,8 @@ function DesignCard({
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
                 ) : (
                   <>
-                    Place order <ArrowRight className="h-4 w-4" aria-hidden />
+                    {needsShipping && paymentMethod === "prepaid" ? "Pay & place order" : "Place order"}{" "}
+                    <ArrowRight className="h-4 w-4" aria-hidden />
                   </>
                 )}
               </button>
