@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getRazorpayClient } from "@/lib/razorpay";
+import { enqueueEmail } from "@/lib/tasks";
+import { refundProcessedEmail } from "@/lib/email";
+import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
 
@@ -20,7 +23,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "orderId is required." }, { status: 400 });
   }
 
-  const order = await prisma.order.findUnique({ where: { id: body.orderId } });
+  const order = await prisma.order.findUnique({
+    where: { id: body.orderId },
+    include: { design: true },
+  });
   if (!order) return NextResponse.json({ error: "Order not found." }, { status: 404 });
 
   if (order.paymentProvider !== "razorpay" || !order.razorpayPaymentId) {
@@ -48,6 +54,22 @@ export async function POST(req: Request) {
         errorMessage: body.reason ?? order.errorMessage,
       },
     });
+
+    if (order.recipientEmail && order.recipientName) {
+      try {
+        await enqueueEmail({
+          to: order.recipientEmail,
+          ...refundProcessedEmail({
+            recipientName: order.recipientName,
+            designTitle: order.design.title,
+            amountRupees: (order.unitPriceCents ?? 0) * order.quantity,
+            reason: body.reason,
+          }),
+        });
+      } catch (err) {
+        logger.error("[refund] Refund email failed to enqueue", { orderId: order.id, error: err });
+      }
+    }
 
     return NextResponse.json({ ok: true, order: updated });
   } catch (err) {

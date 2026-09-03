@@ -18,6 +18,7 @@
     "@google-cloud/logging-winston": "^7.0.1",
     "@google-cloud/opentelemetry-cloud-trace-exporter": "^3.1.0",
     "@google-cloud/storage": "^7.21.0",
+    "@google-cloud/tasks": "^7.0.0",
     "@google/genai": "^2.8.0",
     "@imgly/background-removal-node": "^1.4.5",
     "@opentelemetry/auto-instrumentations-node": "^0.79.0",
@@ -30,6 +31,7 @@
     "langfuse": "^3.38.20",
     "lucide-react": "^1.18.0",
     "next": "16.2.9",
+    "nodemailer": "^9.1.1",
     "pdfkit": "^0.20.2",
     "razorpay": "^2.9.8",
     "react": "19.2.4",
@@ -45,6 +47,7 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
+    "@types/nodemailer": "^8.0.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",

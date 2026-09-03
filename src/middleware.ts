@@ -43,11 +43,11 @@ export const config = {
   // (liveness probes to /api/health must never be blocked), the legal
   // pages (policies should stay publicly reachable for compliance / payment
   // processors even when the rest of the site is behind the gate), and
-  // webhook endpoints — Razorpay's servers call these directly and have no
-  // way to supply our Basic Auth credentials, so gating them would make
-  // every webhook delivery fail with 401 before it ever reaches our
-  // signature check.
+  // server-to-server endpoints — Razorpay's webhook and Cloud Tasks' calls
+  // to /api/tasks/* have no way to supply our Basic Auth credentials, so
+  // gating them would make every delivery fail with 401 before it ever
+  // reaches their own (signature / shared-secret) verification.
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|api/health|terms|privacy|refunds|cookies|contact|api/webhooks).*)",
+    "/((?!_next/static|_next/image|favicon.ico|api/health|terms|privacy|refunds|cookies|contact|api/webhooks|api/tasks).*)",
   ],
 };

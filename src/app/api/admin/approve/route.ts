@@ -4,6 +4,9 @@ import { prisma } from "@/lib/prisma";
 import { getProvider } from "@/lib/print-provider";
 import { readImageAsBase64 } from "@/lib/storage";
 import { settings, printroveProduct } from "@/config/settings";
+import { enqueueEmail } from "@/lib/tasks";
+import { shippedEmail } from "@/lib/email";
+import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -138,6 +141,21 @@ export async function POST(req: Request) {
         errorMessage: null,
       },
     });
+
+    if (result.trackingNumber && order.recipientEmail && order.recipientName) {
+      try {
+        await enqueueEmail({
+          to: order.recipientEmail,
+          ...shippedEmail({
+            recipientName: order.recipientName,
+            designTitle: design.title,
+            trackingNumber: result.trackingNumber,
+          }),
+        });
+      } catch (err) {
+        logger.error("[approve] Shipped email failed to enqueue", { orderId, error: err });
+      }
+    }
 
     return NextResponse.json({ ok: true, order: updated });
   } catch (err) {
