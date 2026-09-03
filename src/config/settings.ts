@@ -49,6 +49,21 @@ export const settings = {
     textTemperature: num(process.env.GEMINI_TEXT_TEMPERATURE, 1.05),
   },
 
+  /**
+   * The GST-registered seller of record on every invoice (§3 of the plan:
+   * you invoice the end customer directly — Printrove invoices you
+   * separately, B2B, on its own cycle). Not real values — every field here
+   * MUST be filled in with your actual registration before any invoice
+   * generated with these placeholders is sent to a real customer.
+   */
+  seller: {
+    businessName: process.env.SELLER_BUSINESS_NAME ?? "wearthistea (PLACEHOLDER — set SELLER_BUSINESS_NAME)",
+    gstin: process.env.SELLER_GSTIN ?? "PLACEHOLDER-GSTIN-NOT-SET",
+    address: process.env.SELLER_ADDRESS ?? "PLACEHOLDER — set SELLER_ADDRESS",
+    /** Two-letter-code-free state name, matched against the buyer's state to pick CGST+SGST vs IGST. */
+    state: process.env.SELLER_STATE ?? "Karnataka",
+  },
+
   images: {
     /**
      * The clean, print-ready design is ALWAYS the one paid AI image per option

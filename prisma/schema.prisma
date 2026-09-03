@@ -162,6 +162,14 @@ model User {
   orders Order[]
 }
 
+// Atomically-incrementing named counters (e.g. GST invoice numbers, which
+// tax rules require to be strictly sequential with no gaps — a timestamp-
+// or id-derived number can't guarantee that under concurrent requests).
+model Counter {
+  key   String @id
+  value Int    @default(0)
+}
+
 model Cache {
   key       String   @id
   value     String   @db.Text

@@ -59,6 +59,27 @@ export async function saveImage(
   return `${URL_PREFIX}/${batchId}/${fileName}`;
 }
 
+/** Save an arbitrary file (e.g. a generated invoice PDF) under a given
+ * relative path and return its public URL — like saveImage, but not
+ * PNG-specific. */
+export async function saveFile(
+  relPath: string,
+  buffer: Buffer,
+  contentType: string
+): Promise<string> {
+  if (storage && GCS_BUCKET) {
+    const bucket = storage.bucket(GCS_BUCKET);
+    const file = bucket.file(relPath);
+    await file.save(buffer, { contentType, resumable: false });
+  } else {
+    const dir = path.join(STORAGE_DIR, path.dirname(relPath));
+    await mkdir(dir, { recursive: true });
+    await writeFile(path.join(STORAGE_DIR, relPath), buffer);
+  }
+
+  return `${URL_PREFIX}/${relPath}`;
+}
+
 /** Read a previously-saved image back as base64 (used for Printify upload). */
 export async function readImageAsBase64(publicPath: string): Promise<string> {
   const relPath = publicPath.replace(/^\/generated\/?/, "");
