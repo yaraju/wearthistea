@@ -252,10 +252,14 @@ Two separate, auto-provisioned queues so email and Printrove-product workloads c
 - `npx prisma db push` applied live to the Neon database; Prisma Client regenerated; `tsc --noEmit` clean.
 - Added `previewSize` to each category in `settings.printrove.products` (men "M", women "M", toddler "2", kids "10").
 
-### Step 3: Customer auth (Track A)
-- Generalize `/api/auth/session` (mint cookie for any valid token, upsert `User`); add `getCustomerSession`/`requireCustomer` to `src/lib/auth.ts`.
-- Build the email-link send + `src/app/auth/verify/page.tsx` flow (check `src/lib/email.ts` for an existing template stub first).
-- Build a customer-facing Google sign-in entry point (reuse `AdminLogin.tsx`'s popup pattern).
+### ✓ Step 3: Customer auth (Track A)
+- Generalized `/api/auth/session` (mints a cookie for any valid token now, upserts `User`); added `getCustomerSession`/`requireCustomer` to `src/lib/auth.ts`. Updated `AdminLogin.tsx` to re-check `/api/auth/me` after sign-in, since the route no longer 403s non-admins itself — preserves the old "not an admin" error message.
+- `magicLinkEmail()` template added to `email.ts`; `POST /api/auth/magic-link` generates the link server-side (`generateEmailSignInLink` in `auth.ts`, Admin SDK) and sends it through the existing branded SendGrid/Cloud-Tasks pipeline rather than Firebase's default email. IP-rate-limited (5/15min) via a new generic `checkAndIncrementIpLimit` in `rate-limit.ts`.
+- `src/app/auth/verify/page.tsx` completes `signInWithEmailLink`, handles the cross-device case (prompts for email if not found in `localStorage`), mints the session cookie, redirects to `?return=` or `/account`.
+- `CustomerSignIn.tsx`: Google popup + email-link request, one component for both checkout and `/account`.
+- `GET /api/account/me`: general signed-in-customer whoami (distinct from `/api/auth/me`, which only ever reports admin status).
+- **Live infra change** (explicit user approval obtained first): Firebase project's email/password provider had `passwordRequired` effectively `true` — passwordless email-link sign-in was not actually enabled, despite `auth.ts`'s comment claiming it was. Flipped via the Identity Toolkit Admin API (`PATCH .../config?updateMask=signIn.email.passwordRequired`, body `passwordRequired:false`). Verified empirically end-to-end: `generateSignInWithEmailLink` now succeeds against the live project and produces a correctly-shaped link.
+- `npm run build` clean (Turbopack) — new routes compile and appear in the route table.
 
 ### Step 4: Address book (Track B)
 - `GET/POST /api/account/addresses`, `GET /api/account/me`.

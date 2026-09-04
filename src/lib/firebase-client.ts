@@ -14,7 +14,7 @@ const config: FirebaseOptions = {
 
 let cachedAuth: Auth | null = null;
 
-/** Lazy singleton — only touched from the admin sign-in page, never at page load. */
+/** Lazy singleton — only touched from sign-in flows (admin, customer, email-link verify), never at page load. */
 export function getFirebaseAuth(): Auth {
   if (cachedAuth) return cachedAuth;
   const app = getApps().length ? getApps()[0] : initializeApp(config);

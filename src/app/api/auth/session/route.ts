@@ -1,15 +1,23 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { createSessionCookie, verifyIdToken, isAdminToken, SESSION_COOKIE, SESSION_MAX_AGE_MS } from "@/lib/auth";
+import { createSessionCookie, verifyIdToken, SESSION_COOKIE, SESSION_MAX_AGE_MS } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
 
 const Body = z.object({ idToken: z.string().min(1) });
 
-// Called right after the client completes Firebase sign-in (Google, for
-// admin). Exchanges the short-lived ID token for an httpOnly session
-// cookie — the client SDK's own persistence lives in IndexedDB/localStorage,
-// which server routes and the admin page's initial load can't read.
+// Called right after the client completes Firebase sign-in — Google (admin
+// or customer) or email-link (customer only, enforced client-side; nothing
+// stops a customer from also using Google). Exchanges the short-lived ID
+// token for an httpOnly session cookie — the client SDK's own persistence
+// lives in IndexedDB/localStorage, which server routes and page initial
+// loads can't read.
+//
+// Deliberately does NOT check isAdminToken here — any valid Firebase user
+// gets a session cookie; admin-ness is re-checked independently on every
+// /api/admin/* request via requireAdmin/getAdminSession. Mixing that check
+// into cookie-minting would block ordinary customers from ever signing in.
 export async function POST(req: Request) {
   let idToken: string;
   try {
@@ -20,14 +28,24 @@ export async function POST(req: Request) {
 
   try {
     const decoded = await verifyIdToken(idToken);
-    if (!isAdminToken(decoded)) {
-      return NextResponse.json(
-        { error: "This Google account isn't an admin on wearthistea." },
-        { status: 403 }
-      );
+    const sessionCookie = await createSessionCookie(idToken);
+
+    if (decoded.email) {
+      await prisma.user.upsert({
+        where: { id: decoded.uid },
+        create: {
+          id: decoded.uid,
+          email: decoded.email,
+          emailVerified: decoded.email_verified ?? false,
+          authProvider: decoded.firebase?.sign_in_provider ?? "email_link",
+        },
+        update: {
+          email: decoded.email,
+          emailVerified: decoded.email_verified ?? false,
+        },
+      });
     }
 
-    const sessionCookie = await createSessionCookie(idToken);
     const res = NextResponse.json({ ok: true });
     res.cookies.set(SESSION_COOKIE, sessionCookie, {
       httpOnly: true,

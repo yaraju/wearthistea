@@ -77,6 +77,26 @@ async function increment(key: string, windowMs: number): Promise<void> {
   });
 }
 
+/**
+ * Generic IP-keyed windowed counter, for endpoints outside the /api/generate
+ * family that still need a cheap abuse guard (e.g. magic-link sends, which
+ * cost an outbound email each and could otherwise be used to spam an
+ * arbitrary inbox). Checks-and-increments atomically enough for a soft
+ * guard — same caveat as isUnderLimit/increment above.
+ */
+export async function checkAndIncrementIpLimit(
+  req: Request,
+  bucket: string,
+  limit: number,
+  windowMs: number
+): Promise<boolean> {
+  const ip = getClientIp(req);
+  const key = `ratelimit:${bucket}:ip:${ip}`;
+  const ok = await isUnderLimit(key, limit, windowMs);
+  if (ok) await increment(key, windowMs);
+  return ok;
+}
+
 export interface RateLimitResult {
   ok: boolean;
   sessionId: string;

@@ -47,6 +47,21 @@ export async function createSessionCookie(idToken: string): Promise<string> {
   return auth().createSessionCookie(idToken, { expiresIn: SESSION_MAX_AGE_MS });
 }
 
+/**
+ * Server-generated email-link sign-in URL (Admin SDK) rather than letting
+ * the client SDK's sendSignInLinkToEmail trigger Firebase's own default
+ * email — this way the link goes out through our existing branded
+ * SendGrid/Cloud-Tasks pipeline (magicLinkEmail in lib/email.ts) like every
+ * other transactional email, instead of looking like a different product.
+ */
+export async function generateEmailSignInLink(email: string): Promise<string> {
+  const siteUrl = (process.env.SITE_URL || "http://localhost:3000").replace(/\/$/, "");
+  return auth().generateSignInWithEmailLink(email, {
+    url: `${siteUrl}/auth/verify`,
+    handleCodeInApp: true,
+  });
+}
+
 /** Verify a session cookie value, checking Firebase's revocation list too. */
 export async function verifySession(sessionCookie: string): Promise<DecodedIdToken | null> {
   try {
@@ -90,6 +105,26 @@ export async function requireAdmin(req: Request): Promise<NextResponse | null> {
       { error: "Sign in as the admin account to do this." },
       { status: 401 }
     );
+  }
+  return null;
+}
+
+/**
+ * Decode the session cookie for a signed-in customer — any valid session,
+ * Google or email-link, no ADMIN_EMAILS/provider restriction. An admin is
+ * also a valid customer session on the same cookie; nothing conflicts.
+ */
+export async function getCustomerSession(req: Request): Promise<DecodedIdToken | null> {
+  const cookie = readCookie(req, SESSION_COOKIE);
+  if (!cookie) return null;
+  return verifySession(cookie);
+}
+
+/** Guard for the top of every /api/account/* handler. */
+export async function requireCustomer(req: Request): Promise<NextResponse | null> {
+  const session = await getCustomerSession(req);
+  if (!session) {
+    return NextResponse.json({ error: "Sign in to do this." }, { status: 401 });
   }
   return null;
 }

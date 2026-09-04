@@ -31,6 +31,14 @@ export default function AdminLogin({ onSignedIn }: { onSignedIn: () => void }) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || "Sign-in failed.");
       }
+      // /api/auth/session mints a cookie for any valid Firebase user now
+      // (customers sign in too, elsewhere) — admin-ness has to be checked
+      // separately here to keep this page's error message specific.
+      const meRes = await fetch("/api/auth/me", { cache: "no-store" });
+      const me = await meRes.json().catch(() => ({}));
+      if (!me.isAdmin) {
+        throw new Error("This Google account isn't an admin on wearthistea.");
+      }
       onSignedIn();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign-in failed.");

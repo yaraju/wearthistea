@@ -47,13 +47,12 @@ export async function sendEmail(payload: EmailPayload): Promise<void> {
 }
 
 // ── Templates ────────────────────────────────────────────────────────────
-// Only the ones actually wired to a trigger today: order confirmation
-// (webhook, on payment.captured), shipped (admin/approve, on a successful
-// Printrove order with a tracking number), and refund processed
-// (admin/refund). Payment-failed/magic-link/marketing don't have a caller
-// yet — magic-link needs Phase 6's auth, marketing needs Phase 6's
-// per-user opt-in, and Razorpay's payment.failed event isn't handled by
-// the webhook yet.
+// Wired to a trigger today: order confirmation (webhook, on
+// payment.captured), shipped (admin/approve, on a successful Printrove
+// order with a tracking number), refund processed (admin/refund), and
+// magic-link (POST /api/auth/magic-link). Payment-failed/marketing still
+// don't have a caller — marketing needs a per-user opt-in flow, and
+// Razorpay's payment.failed event isn't handled by the webhook yet.
 
 function wrap(title: string, bodyHtml: string): string {
   return `<!doctype html><html><body style="font-family:sans-serif;color:#1a1a1a;max-width:480px;margin:0 auto;padding:24px 16px;">
@@ -98,6 +97,19 @@ export function shippedEmail(opts: {
   );
   const text = `Hi ${opts.recipientName},\n\n${opts.designTitle} is on its way.\nTracking number: ${opts.trackingNumber}`;
   return { subject: `Shipped — ${opts.designTitle}`, html, text };
+}
+
+export function magicLinkEmail(opts: {
+  link: string;
+}): Omit<EmailPayload, "to" | "attachments"> {
+  const html = wrap(
+    "Sign in to wearthistea",
+    `<p>Tap the button below to sign in — this link works once and expires soon.</p>
+<p><a href="${opts.link}" style="display:inline-block;margin-top:8px;padding:10px 20px;background:#1a1a1a;color:#fff;text-decoration:none;border-radius:4px;">Sign in</a></p>
+<p style="margin-top:24px;font-size:12px;color:#888;">If you didn't request this, you can ignore this email.</p>`
+  );
+  const text = `Sign in to wearthistea:\n${opts.link}\n\nThis link works once and expires soon. If you didn't request this, you can ignore this email.`;
+  return { subject: "Sign in to wearthistea", html, text };
 }
 
 export function refundProcessedEmail(opts: {
