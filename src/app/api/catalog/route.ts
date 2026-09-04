@@ -3,29 +3,26 @@ import { settings } from "@/config/settings";
 
 export const runtime = "nodejs";
 
-// The landing page's category/product picker. Deliberately NOT a live fetch
-// of Printrove's full catalog anymore — that offered every product Printrove
-// sells (hoodies, joggers, a dozen colors...), most of which have never been
-// tested here. This returns only the categories/products actually wired up
-// in settings.printrove.products (half sleeve, black only, for now).
+// Apparel-type + size options for the pick-time modal (customer) and review
+// modal (admin) — one entry per enabled category in settings.printrove.
+// products. category is now purely a post-generation choice (see the plan
+// doc); this endpoint no longer feeds a brew-time product picker.
 export async function GET() {
   if (settings.provider !== "printrove") {
-    return NextResponse.json({ categories: [] });
+    return NextResponse.json({ categories: [], colors: [] });
   }
 
-  const categories = settings.printrove.products
-    .filter((p) => p.enabled)
-    .map((p) => ({
-      id: p.subtypeId,
-      name: p.categoryLabel,
-      products: [
-        {
-          id: p.subtypeId,
-          name: p.productLabel,
-          colors: ["Black"],
-        },
-      ],
-    }));
+  const enabled = settings.printrove.products.filter((p) => p.enabled);
 
-  return NextResponse.json({ categories });
+  const categories = enabled.map((p) => ({
+    category: p.category,
+    label: p.categoryLabel,
+    sizes: [...new Set(Object.keys(p.variantMap).map((k) => k.split("|")[1]))],
+  }));
+
+  const colors = [
+    ...new Set(enabled.flatMap((p) => Object.keys(p.variantMap).map((k) => k.split("|")[0]))),
+  ];
+
+  return NextResponse.json({ categories, colors });
 }

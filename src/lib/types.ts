@@ -93,18 +93,30 @@ export interface GenerateResponse {
   options: VariantOptionsDTO;
 }
 
-export interface CatalogProduct {
-  id: number;
-  name: string;
-  colors: string[];
-}
-
-export interface CatalogCategory {
-  id: number;
-  name: string;
-  products: CatalogProduct[];
+// One purchasable apparel type — the customer's pick-time choice, not a
+// brew-time one (see the plan doc: category moved from generation-time to
+// selection-time). `category` is the key printroveProduct()/the select and
+// design-product APIs expect ("men", "women", ...), not a numeric id.
+export interface CatalogCategoryOption {
+  category: string;
+  label: string;
+  sizes: string[];
 }
 
 export interface CatalogResponse {
-  categories: CatalogCategory[];
+  categories: CatalogCategoryOption[];
+  colors: string[];
+}
+
+// One (design, category) preview — the real Printrove mockup shown in the
+// pick-time/admin-review modal. mockup* stay null while status is "pending"
+// (Printrove renders it asynchronously) or "failed".
+export interface DesignProductDTO {
+  status: string;
+  category: string;
+  color: string;
+  mockupFrontUrl: string | null;
+  mockupBackUrl: string | null;
+  errorMessage: string | null;
+  approvalStatus: string;
 }

@@ -279,11 +279,17 @@ Two separate, auto-provisioned queues so email and Printrove-product workloads c
 - **Verified live end-to-end** against a real existing design: product created for "men" (id 878647) and "women" (id 878648) on the same design, `printroveDesignId` (11926373146) identical across both — confirmed no re-upload on the second category. Mockup poll confirmed working (`null` → populated `front_mockup`/`back_mockup` a few seconds later).
 - `npm run build` clean — `/api/tasks/printrove-products` compiles and appears in the route table.
 
-### Step 6: Customer pick-time modal + checkout wiring (Track C, UI half)
-- `/api/catalog/categories`, `/api/designs/[id]/product`.
-- Modal replacing `DesignCard`'s inline form: apparel-type dropdown, polling, carousel with the indicative-preview disclaimer, address snippet from Track B.
-- Drop the brew-form category selector.
-- `/api/designs/select`: add `category`, approval-aware auto-fulfill branch.
+### ✓ Step 6: Customer pick-time modal + checkout wiring (Track C, UI half)
+- **Repurposed `/api/catalog`** (rather than adding a parallel endpoint) — it only ever powered the brew-form category/product selector being removed in this step, so it now returns `{categories: [{category, label, sizes}], colors}` for the pick-time modal instead of the old numeric-id product-picker shape.
+- `GET /api/designs/[id]/product?category=` — thin wrapper over `ensureDesignProduct` (Step 5).
+- `DesignProductPreview.tsx` (new, shared): polls that endpoint, renders the carousel (brewed art → real mockup front/back) with the indicative-preview disclaimer. Built shared on purpose — Step 7's admin review modal reuses it.
+- `PickDesignModal.tsx` (new): apparel-type dropdown, the preview above, size/qty, and — wiring in Track B, deferred from Step 4 — a signed-in-customer's saved-address snippet/switcher/"add another" (`AddAddressForm` extracted out of `/account/page.tsx` into its own component so both places share it), sign-in prompt (`CustomerSignIn`) when not signed in, payment method, submit.
+- `KeywordStudio.tsx`: dropped the brew-form apparel-type selector (color stays — still generation-time content); `DesignCard` now just opens `PickDesignModal` instead of an inline form; removed the now-dead Razorpay helpers (moved into the modal).
+- `/api/designs/select`: `category` added to the body, validated against enabled categories (the existing `printroveProduct()` fallback-to-"men" made an explicit check necessary — it doesn't reject an unknown category on its own), used for pricing/variantMap/`productCategory` instead of `design.category`. Looks up/creates the matching `DesignProduct` via `ensureDesignProduct` and stores its id on `Order.designProductId`; rejects outright if that combo's `approvalStatus === "rejected"`. **The "approved → skip the queue" branch is intentionally not here yet** — it needs `pushOrderToProvider`, which Step 7 extracts.
+
+**A real bug live-testing caught, not `tsc`**: `CustomerSignIn` and `AddAddressForm` each render their own `<form>`; the modal originally wrapped everything (including them) in one outer `<form onSubmit={placeOrder}>` — a `<form>` nested inside a `<form>`, invalid HTML, confirmed as a React hydration error in the browser console (`tsc`/`next build` had nothing to say about it — this is a runtime DOM-nesting rule, not a type error). Fixed by dropping the outer `<form>` entirely (`placeOrder` already reads from React state, not `FormData`, so it wasn't load-bearing) in favor of a plain button + click handler. Re-verified live: error gone, and confirmed further downstream — the real Printrove mockup (an actual black tee with the design printed on it) rendered correctly as the second carousel slide once `ensureDesignProduct`'s poll resolved.
+
+Verified live end-to-end in a real browser (dev server, Basic Auth disabled locally for the session): brewed a design, opened the pick modal, watched the carousel go from brewed art → real Printrove mockup, confirmed the disclaimer copy renders, confirmed the sign-in prompt renders when signed out. Did not click through actual Google OAuth (out of scope for this kind of check — would mean performing a real sign-in the user didn't ask for).
 
 ### Step 7: Shared fulfillment + admin review surface (Track C, approval half)
 - Extract `pushOrderToProvider` into `src/lib/fulfillment.ts`; rewire `/api/admin/approve` to call it.

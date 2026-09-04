@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { settings, printroveProduct } from "@/config/settings";
 import { realizeDesign } from "@/lib/realize";
 import { computeGst } from "@/lib/gst";
+import { ensureDesignProduct } from "@/lib/design-products";
 
 export const runtime = "nodejs";
 
@@ -24,6 +25,10 @@ const Customer = z.object({
 
 const Body = z.object({
   designId: z.string().min(1),
+  // Apparel type — a pick-time choice now, not inherited from the design's
+  // generation-time category (see the plan doc). Validated below against
+  // settings.printrove.products, not just accepted as free text.
+  category: z.string().trim().min(1).max(40),
   size: z.string().trim().min(1).max(40),
   color: z.string().trim().min(1).max(40),
   quantity: z.number().int().min(1).max(10).default(1),
@@ -70,15 +75,26 @@ export async function POST(req: Request) {
       { status: 409 }
     );
 
-  // Reject a size/color that isn't actually sellable for this design's
-  // category — the checkout form only ever offers valid combinations, but
-  // this is the boundary where a stale or tampered client can't slip one
-  // past us into an Order Printrove would then fail (or silently mis-sell).
+  // Reject a category/size/color that isn't actually sellable — the pick
+  // modal only ever offers valid combinations, but this is the boundary
+  // where a stale or tampered client can't slip one past us into an Order
+  // Printrove would then fail (or silently mis-sell). printroveProduct()
+  // falls back to "men" for an unknown category, so the enabled-category
+  // check has to happen explicitly rather than trusting its return value.
   if (settings.provider === "printrove") {
-    const product = printroveProduct(design.category);
+    const categoryValid = settings.printrove.products.some(
+      (p) => p.enabled && p.category === body.category
+    );
+    if (!categoryValid) {
+      return NextResponse.json(
+        { error: `"${body.category}" isn't an offered apparel type.` },
+        { status: 400 }
+      );
+    }
+    const product = printroveProduct(body.category);
     if (!product.variantMap[`${body.color}|${body.size}`]) {
       return NextResponse.json(
-        { error: `"${body.size}" in "${body.color}" isn't offered for this design.` },
+        { error: `"${body.size}" in "${body.color}" isn't offered for this apparel type.` },
         { status: 400 }
       );
     }
@@ -125,14 +141,31 @@ export async function POST(req: Request) {
   // charge before approval ever happens, and pricing it up front (instead of
   // whatever settings.printrove looks like whenever an admin eventually
   // clicks approve) is what the customer actually agreed to pay.
-  const product = printroveProduct(design.category);
+  const product = printroveProduct(body.category);
   const gst = computeGst(product.retailPrice, body.quantity, c?.state || null, settings.seller.state);
+
+  // The reviewable (design, category, color) combo this order belongs to —
+  // almost always already created by the pick modal's preview poll before
+  // the buyer ever got here, so this is normally just a cache read. Its
+  // approvalStatus determines whether this order can skip the human queue
+  // (see fulfillment.ts's pushOrderToProvider, wired in a later step).
+  const designProduct =
+    settings.provider === "printrove"
+      ? await ensureDesignProduct(body.designId, body.category)
+      : null;
+  if (designProduct?.approvalStatus === "rejected") {
+    return NextResponse.json(
+      { error: "This design isn't available for that apparel type." },
+      { status: 409 }
+    );
+  }
 
   const order = await prisma.order.create({
     data: {
       designId: body.designId,
+      designProductId: designProduct?.id ?? null,
       status: prepaid ? "pending_payment" : "pending",
-      productCategory: design.category,
+      productCategory: body.category,
       variantSize: body.size,
       variantColor: body.color,
       quantity: body.quantity,

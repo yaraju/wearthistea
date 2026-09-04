@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect, type ChangeEvent, type FormEvent } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { Sparkles, Loader2, Check, AlertTriangle, ArrowRight, RotateCcw } from "lucide-react";
-import type { DesignDTO, GenerateResponse, VariantOptionsDTO, CatalogResponse, CatalogProduct, CatalogCategory } from "@/lib/types";
+import type { DesignDTO, GenerateResponse } from "@/lib/types";
 import { getColorCode } from "@/lib/colors";
+import PickDesignModal from "@/components/PickDesignModal";
 
 const SKELETON_COUNT = 5; // matches default settings.optionsPerKeyword
 
@@ -45,29 +46,6 @@ async function runWithConcurrency<T>(
   await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, run));
 }
 
-declare global {
-  interface Window {
-    Razorpay?: new (opts: Record<string, unknown>) => { open: () => void };
-  }
-}
-
-let razorpayScriptPromise: Promise<void> | null = null;
-
-/** Load Razorpay's Checkout script once, lazily — only visitors who
- * actually choose "Pay Now" ever pull it in. */
-function loadRazorpayScript(): Promise<void> {
-  if (window.Razorpay) return Promise.resolve();
-  if (razorpayScriptPromise) return razorpayScriptPromise;
-  razorpayScriptPromise = new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = "https://checkout.razorpay.com/v1/checkout.js";
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error("Could not load the payment form. Check your connection and try again."));
-    document.body.appendChild(script);
-  });
-  return razorpayScriptPromise;
-}
-
 /** Translate raw API errors into a one-line human reason. */
 function friendlyError(msg: string): string {
   if (/limit:\s*0|RESOURCE_EXHAUSTED|free_tier|quota|\b429\b/i.test(msg)) {
@@ -84,8 +62,11 @@ export default function KeywordStudio() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<GenerateResponse | null>(null);
-  const [catalog, setCatalog] = useState<CatalogResponse>({ categories: [] });
-  const [selectedProduct, setSelectedProduct] = useState<CatalogProduct | null>(null);
+  // Apparel type is no longer a brew-time choice (see the plan doc — one
+  // design now generates once and gets a Printrove preview product per
+  // category, picked at "select this design" time instead). Color stays
+  // here since it genuinely affects generation (ink-contrast direction).
+  const [colors, setColors] = useState<string[]>(["Black"]);
   const [selectedColor, setSelectedColor] = useState("Black");
   const [style, setStyle] = useState<"raster" | "svg">("raster");
   const [examples, setExamples] = useState<string[]>([]);
@@ -94,23 +75,10 @@ export default function KeywordStudio() {
   useEffect(() => {
     fetch("/api/catalog")
       .then(res => res.json())
-      .then(data => {
-        setCatalog(data);
-        // Default: Mens' Clothing -> Half Sleeve Round Neck T-shirt -> Black
-        const mensClothing = data.categories?.find((c: CatalogCategory) => c.name.toLowerCase().includes("men"));
-        const defaultProduct = mensClothing?.products?.find((p: CatalogProduct) => p.name.toLowerCase().includes("half sleeve round neck"));
-        
-        if (defaultProduct) {
-          setSelectedProduct(defaultProduct);
-          if (defaultProduct.colors.includes("Black")) {
-            setSelectedColor("Black");
-          } else if (defaultProduct.colors.length > 0) {
-            setSelectedColor(defaultProduct.colors[0]);
-          }
-        } else if (data.categories?.length > 0 && data.categories[0].products?.length > 0) {
-          const firstProd = data.categories[0].products[0];
-          setSelectedProduct(firstProd);
-          setSelectedColor(firstProd.colors[0] || "Black");
+      .then((data: { colors: string[] }) => {
+        if (data.colors?.length > 0) {
+          setColors(data.colors);
+          setSelectedColor(data.colors.includes("Black") ? "Black" : data.colors[0]);
         }
       })
       .catch(err => console.error("Failed to fetch catalog", err));
@@ -133,17 +101,16 @@ export default function KeywordStudio() {
     setError(null);
     setResult(null);
 
-    const selectedCategory = catalog.categories.find(c => c.products.some(p => p.id === selectedProduct?.id));
-
     try {
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           keyword: tea,
-          productId: selectedProduct?.id,
-          category: selectedCategory?.name,
-          productType: selectedProduct?.name,
+          // No productId/category/productType — apparel type is a pick-time
+          // choice now. The server defaults category to "men" purely as
+          // flavor text in the render prompt ("printed on a Black T-shirt");
+          // it no longer determines what's actually sellable.
           color: selectedColor,
           style
         }),
@@ -222,36 +189,6 @@ export default function KeywordStudio() {
       <div className="sticker sticker-pink rounded-2xl bg-paper-2 p-2 sm:p-3">
         <div className="flex flex-col gap-3">
           <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
-            <div className="flex min-w-0 flex-1 flex-col gap-2">
-              <label htmlFor="product-select" className="px-2 font-mono text-xs font-bold uppercase tracking-wider text-ink-soft">
-                Product & Style
-              </label>
-              <select
-                id="product-select"
-                name="product-select"
-                className="w-full rounded-xl bg-paper-1 px-4 py-3 font-mono text-sm text-ink focus:outline-none"
-                value={selectedProduct?.id || ""}
-                onChange={(e) => {
-                  const prodId = parseInt(e.target.value);
-                  const prod = catalog.categories.flatMap(c => c.products).find(p => p.id === prodId);
-                  setSelectedProduct(prod || null);
-                  if (prod && !prod.colors.includes(selectedColor)) {
-                    setSelectedColor(prod.colors[0] || "Black");
-                  }
-                }}
-              >
-                {catalog.categories.map((cat) => (
-                  <optgroup key={cat.id} label={cat.name}>
-                    {cat.products.map((prod) => (
-                      <option key={prod.id} value={prod.id}>
-                        {prod.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
-            </div>
-
             <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-initial">
               <label htmlFor="color-select" className="px-2 font-mono text-xs font-bold uppercase tracking-wider text-ink-soft">
                 Color
@@ -263,7 +200,7 @@ export default function KeywordStudio() {
                 value={selectedColor}
                 onChange={(e) => setSelectedColor(e.target.value)}
               >
-                {selectedProduct?.colors.map((color: string) => (
+                {colors.map((color) => (
                   <option key={color} value={color}>
                     {color}
                   </option>
@@ -406,7 +343,6 @@ export default function KeywordStudio() {
                     design={d}
                     index={i}
                     reduce={reduce}
-                    options={result.options}
                     onRetry={retryDesign}
                     selectedColor={selectedColor}
                   />
@@ -453,164 +389,25 @@ function LoadingGrid({ reduce }: { reduce: boolean | null }) {
   );
 }
 
-const FIELD_CLS =
-  "w-full rounded-lg border border-line bg-paper px-3 py-2 font-mono text-xs text-ink placeholder:text-ink-soft/60 focus:border-ink focus:outline-none";
-
 function DesignCard({
   design,
   index,
   reduce,
-  options,
   onRetry,
   selectedColor,
 }: {
   design: DesignDTO;
   index: number;
   reduce: boolean | null;
-  options: VariantOptionsDTO;
   onRetry?: (id: string) => void;
   selectedColor: string;
 }) {
   const [status, setStatus] = useState(design.status);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
-
-  const needsShipping = options.provider !== "printify";
-
-  const [form, setForm] = useState({
-    size: options.sizes[0] ?? "",
-    color: selectedColor || (options.colors[0] ?? ""),
-    quantity: "1",
-    name: "",
-    email: "",
-    phone: "",
-    address1: "",
-    address2: "",
-    city: "",
-    state: "",
-    pincode: "",
-    country: options.countries[0] ?? "",
-  });
-  // Prepaid cuts down on cash-on-delivery returns, so it's the default —
-  // COD stays available as a fallback for anyone who'd rather not pay online.
-  const [paymentMethod, setPaymentMethod] = useState<"prepaid" | "cod">("prepaid");
-  const [paid, setPaid] = useState(false);
-
-  // Sync color when user selects a different color in the studio
-  useEffect(() => {
-    if (selectedColor && options.colors.includes(selectedColor)) {
-      setForm(f => ({ ...f, color: selectedColor }));
-    }
-  }, [selectedColor, options.colors]);
-
-  const set =
-    (k: keyof typeof form) =>
-    (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
-      setForm((f) => ({ ...f, [k]: e.target.value }));
 
   const failed = design.status === "failed";
   const generating = design.status === "generating";
   const queued = status === "pending";
-
-  async function placeOrder(e: FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setErr(null);
-    const wantsPrepaid = needsShipping && paymentMethod === "prepaid";
-    try {
-      const payload: Record<string, unknown> = {
-        designId: design.id,
-        size: form.size,
-        color: form.color,
-        quantity: Number(form.quantity) || 1,
-        paymentMethod: wantsPrepaid ? "prepaid" : "cod",
-      };
-      if (needsShipping) {
-        payload.customer = {
-          name: form.name,
-          email: form.email,
-          phone: form.phone,
-          address1: form.address1,
-          address2: form.address2,
-          city: form.city,
-          state: form.state,
-          pincode: form.pincode,
-          country: form.country,
-        };
-      }
-      const res = await fetch("/api/designs/select", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const data = await parseJsonResponse(res);
-      if (!res.ok) throw new Error(data.error ?? "Could not place this order.");
-
-      if (!wantsPrepaid) {
-        setStatus("pending");
-        setOpen(false);
-        return;
-      }
-
-      // Prepaid: open Razorpay Checkout against the order just created.
-      const orderId = data.order.id as string;
-      await loadRazorpayScript();
-      const createRes = await fetch("/api/orders/create", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderId }),
-      });
-      const createData = await parseJsonResponse(createRes);
-      if (!createRes.ok) throw new Error(createData.error ?? "Could not start payment.");
-      if (!createData.keyId) throw new Error("Online payment isn't set up yet — try Cash on Delivery.");
-
-      await new Promise<void>((resolve, reject) => {
-        const rzp = new window.Razorpay!({
-          key: createData.keyId,
-          amount: createData.amountPaise,
-          currency: createData.currency,
-          order_id: createData.razorpayOrderId,
-          name: "wearthistea",
-          description: design.title,
-          prefill: { name: form.name, email: form.email, contact: form.phone },
-          handler: async (response: {
-            razorpay_order_id: string;
-            razorpay_payment_id: string;
-            razorpay_signature: string;
-          }) => {
-            try {
-              const verifyRes = await fetch("/api/orders/verify", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(response),
-              });
-              const verifyData = await parseJsonResponse(verifyRes);
-              if (!verifyRes.ok || !verifyData.ok) {
-                reject(new Error("Payment could not be verified. Contact us with your payment id."));
-                return;
-              }
-              resolve();
-            } catch {
-              reject(new Error("Payment could not be verified. Contact us with your payment id."));
-            }
-          },
-          modal: {
-            ondismiss: () => reject(new Error("Payment cancelled.")),
-          },
-        });
-        rzp.open();
-      });
-
-      setPaid(true);
-      setStatus("pending");
-      setOpen(false);
-    } catch (e2) {
-      setErr(e2 instanceof Error ? e2.message : "Failed.");
-    } finally {
-      setBusy(false);
-    }
-  }
 
   // Show the clean, transparent print art (what actually gets printed) rather
   // than the tee mockup — it's far more visible and selectable in the grid.
@@ -625,7 +422,7 @@ function DesignCard({
         queued ? "sticker-tea" : ""
       }`}
     >
-      <div 
+      <div
         className="relative flex aspect-[4/5] items-center justify-center overflow-hidden p-5"
         style={{ backgroundColor: getColorCode(selectedColor) }}
       >
@@ -698,226 +495,8 @@ function DesignCard({
         ) : queued ? (
           <p className="flex items-center gap-1.5 font-mono text-sm font-bold text-tea">
             <Check className="h-4 w-4" aria-hidden />
-            {paid ? "payment received — sent to the drop queue" : "sent to the drop queue"}
+            sent to the drop queue
           </p>
-        ) : open ? (
-          <form onSubmit={placeOrder} className="mt-1 space-y-2.5">
-            <div className="flex gap-2">
-              <label className="flex-1">
-                <span className="kicker text-ink-soft">Size</span>
-                <select
-                  id="size"
-                  name="size"
-                  aria-label="Size"
-                  value={form.size}
-                  onChange={set("size")}
-                  className={`mt-1 ${FIELD_CLS}`}
-                >
-                  {options.sizes.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="flex-1">
-                <span className="kicker text-ink-soft">Color</span>
-                <select
-                  id="color"
-                  name="color"
-                  aria-label="Color"
-                  value={form.color}
-                  onChange={set("color")}
-                  className={`mt-1 ${FIELD_CLS}`}
-                >
-                  {options.colors.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="w-16">
-                <span className="kicker text-ink-soft">Qty</span>
-                <input
-                  id="quantity"
-                  name="quantity"
-                  aria-label="Quantity"
-                  type="number"
-                  min={1}
-                  max={10}
-                  value={form.quantity}
-                  onChange={set("quantity")}
-                  className={`mt-1 ${FIELD_CLS}`}
-                />
-              </label>
-            </div>
-
-            {needsShipping && (
-              <div className="space-y-2.5 border-t border-line pt-2.5">
-                <input
-                  id="name"
-                  name="name"
-                  required
-                  aria-label="Full name"
-                  autoComplete="name"
-                  placeholder="Full name"
-                  value={form.name}
-                  onChange={set("name")}
-                  className={FIELD_CLS}
-                />
-                <div className="flex gap-2">
-                  <input
-                    id="phone"
-                    name="phone"
-                    required
-                    aria-label="Phone"
-                    type="tel"
-                    autoComplete="tel"
-                    placeholder="Phone"
-                    value={form.phone}
-                    onChange={set("phone")}
-                    className={FIELD_CLS}
-                  />
-                  <input
-                    id="email"
-                    name="email"
-                    required
-                    aria-label="Email"
-                    type="email"
-                    autoComplete="email"
-                    placeholder="Email"
-                    value={form.email}
-                    onChange={set("email")}
-                    className={FIELD_CLS}
-                  />
-                </div>
-                <input
-                  id="address1"
-                  name="address1"
-                  required
-                  aria-label="Address line 1"
-                  autoComplete="address-line1"
-                  placeholder="Address line 1"
-                  value={form.address1}
-                  onChange={set("address1")}
-                  className={FIELD_CLS}
-                />
-                <input
-                  id="address2"
-                  name="address2"
-                  aria-label="Address line 2"
-                  autoComplete="address-line2"
-                  placeholder="Address line 2 (optional)"
-                  value={form.address2}
-                  onChange={set("address2")}
-                  className={FIELD_CLS}
-                />
-                <div className="flex gap-2">
-                  <input
-                    id="city"
-                    name="city"
-                    aria-label="City"
-                    autoComplete="address-level2"
-                    placeholder="City"
-                    value={form.city}
-                    onChange={set("city")}
-                    className={FIELD_CLS}
-                  />
-                  <input
-                    id="state"
-                    name="state"
-                    aria-label="State"
-                    autoComplete="address-level1"
-                    placeholder="State"
-                    value={form.state}
-                    onChange={set("state")}
-                    className={FIELD_CLS}
-                  />
-                </div>
-                <div className="flex gap-2">
-                  <input
-                    id="pincode"
-                    name="pincode"
-                    aria-label="PIN or ZIP code"
-                    autoComplete="postal-code"
-                    placeholder="PIN / ZIP"
-                    value={form.pincode}
-                    onChange={set("pincode")}
-                    className={FIELD_CLS}
-                  />
-                  <select
-                    id="country"
-                    name="country"
-                    aria-label="Country"
-                    required
-                    autoComplete="country-name"
-                    value={form.country}
-                    onChange={set("country")}
-                    className={FIELD_CLS}
-                  >
-                    {options.countries.map((c) => (
-                      <option key={c} value={c}>
-                        {c}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="flex gap-3 pt-1">
-                  <label className="flex items-center gap-1.5 font-mono text-[11px] text-ink">
-                    <input
-                      type="radio"
-                      name="paymentMethod"
-                      value="prepaid"
-                      checked={paymentMethod === "prepaid"}
-                      onChange={() => setPaymentMethod("prepaid")}
-                    />
-                    Pay now
-                  </label>
-                  <label className="flex items-center gap-1.5 font-mono text-[11px] text-ink">
-                    <input
-                      type="radio"
-                      name="paymentMethod"
-                      value="cod"
-                      checked={paymentMethod === "cod"}
-                      onChange={() => setPaymentMethod("cod")}
-                    />
-                    Cash on delivery
-                  </label>
-                </div>
-                <p className="font-mono text-[10px] leading-relaxed text-ink-soft">
-                  {paymentMethod === "prepaid"
-                    ? "Pay online now — we print & ship after a quick review."
-                    : "Cash on delivery · we print & ship after a quick review."}
-                </p>
-              </div>
-            )}
-
-            <div className="flex gap-2 pt-0.5">
-              <button
-                type="submit"
-                disabled={busy}
-                className="inline-flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-ink bg-highlight px-4 py-2.5 font-mono text-xs font-bold uppercase tracking-wider text-ink transition-transform duration-200 hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {busy ? (
-                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                ) : (
-                  <>
-                    {needsShipping && paymentMethod === "prepaid" ? "Pay & place order" : "Place order"}{" "}
-                    <ArrowRight className="h-4 w-4" aria-hidden />
-                  </>
-                )}
-              </button>
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                disabled={busy}
-                className="cursor-pointer rounded-xl border-2 border-line px-3 py-2.5 font-mono text-xs font-bold uppercase tracking-wider text-ink-soft transition-colors hover:border-ink hover:text-ink disabled:opacity-50"
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
         ) : (
           <button
             onClick={() => setOpen(true)}
@@ -926,8 +505,18 @@ function DesignCard({
             Pick this one <ArrowRight className="h-4 w-4" aria-hidden />
           </button>
         )}
-        {err && <p className="mt-2 text-xs text-pink-ink">{err}</p>}
       </figcaption>
+
+      {open && (
+        <PickDesignModal
+          design={design}
+          onClose={() => setOpen(false)}
+          onPlaced={() => {
+            setStatus("pending");
+            setOpen(false);
+          }}
+        />
+      )}
     </motion.figure>
   );
 }
