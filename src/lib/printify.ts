@@ -241,7 +241,7 @@ async function fulfill(input: FulfillInput): Promise<FulfillResult> {
     designBase64: input.designBase64,
     priceCents: input.priceCents,
   });
-  return { productId, orderId: null, url, trackingNumber: null };
+  return { productId, orderId: null, url, trackingNumber: null, printroveDesignId: null };
 }
 
 export const printifyProvider: PrintProvider = { name: "printify", options, fulfill };

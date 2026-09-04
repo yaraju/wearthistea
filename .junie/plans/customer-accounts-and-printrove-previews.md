@@ -268,9 +268,16 @@ Two separate, auto-provisioned queues so email and Printrove-product workloads c
 - `npm run build` clean.
 - **Not done yet, by design**: the snippet/switcher/"add another" wiring *inside checkout* doesn't exist yet — there's no pick-modal for it to live in until Step 6 replaces `DesignCard`'s inline form. The backend (this step) is ready for it.
 
-### Step 5: PrintRove product orchestration (Track C, provisioning half)
-- `src/lib/design-products.ts` (`ensureDesignProduct`), `getProduct()` in `printrove.ts`, `FulfillInput`/`FulfillResult` gain `printroveDesignId` passthrough.
-- `enqueuePrintroveProducts` + `/api/tasks/printrove-products` handler, wired into `/api/generate/retry`.
+### ✓ Step 5: PrintRove product orchestration (Track C, provisioning half)
+- `src/lib/design-products.ts` (`ensureDesignProduct`) — the single function behind both the brew task and the on-demand pick-time endpoint; upload-once/create-per-category, idempotent via upsert on the `(designId, category, color)` unique constraint.
+- `getProduct()`, plus `uploadDesign()`/`createProduct()` exported, added to `printrove.ts`. `FulfillInput`/`FulfillResult` gain `printroveDesignId` passthrough (as `string`, see below); `fulfill()` skips re-uploading when one's supplied.
+- `enqueuePrintroveProducts` (25-min `dispatchDeadline`, no synchronous fallback — see its doc comment for why that's deliberate) + `/api/tasks/printrove-products` handler (loops every enabled category), wired into `/api/generate/retry` right after `status: "generated"`. **Awaited, not fire-and-forget** — matches the existing `enqueueEmail` convention elsewhere, since Cloud Run can throttle CPU after a response is sent.
+
+**Bugs caught only by live-testing against the real API/DB (this is exactly why the plan keeps doing that instead of trusting types alone):**
+1. **Printrove's uploaded-design ids overflow Int32** (observed: `11926373144`, 11 digits). Changed `Design.printroveDesignId` and `DesignProduct.printroveProductId`/`printroveVariantId` from `Int?` to `String?` in the schema — matching the convention `Order.printroveProductId` already used for the same reason. `FulfillResult.printroveDesignId` is `string | null` accordingly; `printrove.ts`/`design-products.ts` convert at the number↔string boundary.
+2. **The schema fix above hit a second, unrelated blocker**: the Neon database was at 421MB of a 512MB cap (`Design` table alone: 413MB, almost entirely `designImageData` base64 fallback blobs — 242 of 335 designs have one; unrelated to this work). An in-place `ALTER COLUMN TYPE` on that 413MB table needs enough headroom for Postgres to rewrite it, which pushed past the cap. Fix: verified `Design.printroveDesignId` was 100%-NULL (brand new this session, nothing had ever written to it), then did a manual `DROP COLUMN` + `ADD COLUMN ... TEXT` instead of an in-place type change — both metadata-only operations on Postgres, no table rewrite, since there was no data to preserve. **This does not resolve the underlying 421MB/512MB pressure** — a future migration that touches a populated column on the `Design` table, or continued growth of `designImageData`, will hit this again. Worth deciding separately (Neon plan upgrade, or dropping `designImageData` for designs whose files are confirmed present on disk/GCS) — out of scope for this plan, flagging for awareness.
+- **Verified live end-to-end** against a real existing design: product created for "men" (id 878647) and "women" (id 878648) on the same design, `printroveDesignId` (11926373146) identical across both — confirmed no re-upload on the second category. Mockup poll confirmed working (`null` → populated `front_mockup`/`back_mockup` a few seconds later).
+- `npm run build` clean — `/api/tasks/printrove-products` compiles and appears in the route table.
 
 ### Step 6: Customer pick-time modal + checkout wiring (Track C, UI half)
 - `/api/catalog/categories`, `/api/designs/[id]/product`.

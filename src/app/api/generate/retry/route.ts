@@ -7,6 +7,8 @@ import { compositeOnTee } from "@/lib/mockup";
 import { saveImage } from "@/lib/storage";
 import { settings } from "@/config/settings";
 import { checkGenerateRateLimit, recordGenerateUsage, setRateLimitCookie } from "@/lib/rate-limit";
+import { enqueuePrintroveProducts } from "@/lib/tasks";
+import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -103,6 +105,23 @@ export async function POST(req: Request) {
         errorMessage: null,
       },
     });
+
+    // Brew Printrove preview products for every enabled category now, so
+    // they're usually ready by the time a customer picks this design.
+    // Awaited (not fire-and-forget) — Cloud Run can throttle/suspend CPU
+    // once a response is sent, so a detached promise here isn't reliably
+    // guaranteed to finish (same reasoning as the awaited enqueueEmail calls
+    // elsewhere). Never fails the response either way — the artwork already
+    // rendered successfully, which is what the customer is waiting on; the
+    // pick-time endpoint falls back to creating these on demand regardless.
+    try {
+      await enqueuePrintroveProducts(designId);
+    } catch (err) {
+      logger.error("[generate/retry] Failed to enqueue Printrove preview creation", {
+        designId,
+        error: err,
+      });
+    }
 
     const res = NextResponse.json({ design: updated });
     setRateLimitCookie(res, rateLimit);

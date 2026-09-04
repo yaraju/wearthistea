@@ -88,7 +88,11 @@ function pickId(data: Json, ...keys: string[]): number | null {
 }
 
 // ── Design upload (multipart) ────────────────────────────────────────────────
-async function uploadDesign(fileName: string, base64: string): Promise<number> {
+// Exported: design-products.ts calls this directly (not through fulfill())
+// to upload a design's artwork once and reuse the resulting id across every
+// (category, color) preview product for that design — see
+// Design.printroveDesignId.
+export async function uploadDesign(fileName: string, base64: string): Promise<number> {
   const token = await getToken();
   const bytes = Buffer.from(base64, "base64");
   const form = new FormData();
@@ -126,7 +130,10 @@ function frontDesign(designId: number, print: PrintroveProductConfig["print"]) {
 }
 
 // ── Create product (adds the design-on-blank to your Product Library) ─────────
-async function createProduct(opts: {
+// Exported: design-products.ts calls this directly for preview-product
+// creation (one per design/category/color, at a fixed previewSize), same as
+// fulfill() does for a real order's actual variant.
+export async function createProduct(opts: {
   name: string;
   designId: number;
   baseVariantId: number;
@@ -154,6 +161,31 @@ async function createProduct(opts: {
   const variantId = variants?.[0]?.id != null ? Number(variants[0].id) : null;
 
   return { productId, variantId };
+}
+
+export interface PrintroveMockup {
+  front_mockup?: string;
+  back_mockup?: string;
+  front_mockup_thumbnail?: string;
+  back_mockup_thumbnail?: string;
+}
+
+/**
+ * GET /products/{id} — a just-created product's mockup is null until
+ * Printrove finishes rendering it asynchronously (seconds, verified live —
+ * not returned synchronously by createProduct). Callers poll this.
+ */
+export async function getProduct(
+  productId: number
+): Promise<{ variantId: number | null; mockup: PrintroveMockup | null }> {
+  const data = await api(`/products/${productId}`, { method: "GET" });
+  const product = (data.product ?? data.data ?? data) as Json;
+  const variants = product.variants as
+    | Array<{ id?: number | string; mockup?: PrintroveMockup | null }>
+    | undefined;
+  const variant = variants?.[0];
+  const variantId = variant?.id != null ? Number(variant.id) : null;
+  return { variantId, mockup: variant?.mockup ?? null };
 }
 
 // ── Place order (COD by default) ─────────────────────────────────────────────
@@ -473,7 +505,14 @@ export async function fulfill(input: FulfillInput): Promise<FulfillResult> {
     product.sizeAttrId,
     product.colorAttrId
   );
-  const designId = await uploadDesign(input.designFileName, input.designBase64);
+  // Reuse the design asset already uploaded at brew time (design-products.ts)
+  // when we have it — upload is size/category-agnostic, so there's never a
+  // reason to re-upload the same artwork. Still always calls createProduct
+  // for THIS variant's actual size — a cached preview product (built at
+  // previewSize) is never reused here; see the DesignProduct doc comment.
+  const designId = input.printroveDesignId
+    ? Number(input.printroveDesignId)
+    : await uploadDesign(input.designFileName, input.designBase64);
   const { productId, variantId } = await createProduct({
     name: input.title,
     designId,
@@ -499,7 +538,7 @@ export async function fulfill(input: FulfillInput): Promise<FulfillResult> {
     trackingNumber = res.trackingNumber;
   }
 
-  return { productId: String(productId), orderId, url: null, trackingNumber };
+  return { productId: String(productId), orderId, url: null, trackingNumber, printroveDesignId: String(designId) };
 }
 
 export const printroveProvider: PrintProvider = { name: "printrove", options, fulfill };

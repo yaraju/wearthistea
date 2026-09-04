@@ -43,6 +43,14 @@ export interface FulfillInput {
   /** Recipient + shipping. Required by order-placing providers (Printrove). */
   customer: FulfillCustomer | null;
   cod: boolean;
+  /**
+   * Printrove's uploaded design asset id, when already known (Design.
+   * printroveDesignId, set at brew time) — lets fulfill() skip re-uploading
+   * the same artwork. Ignored by providers that don't have this concept
+   * (Printify). String, not number — see the schema comment on
+   * Design.printroveDesignId for why (Printrove's ids overflow Int32).
+   */
+  printroveDesignId?: string | null;
 }
 
 export interface FulfillResult {
@@ -51,6 +59,12 @@ export interface FulfillResult {
   /** Storefront/tracking URL, when the provider exposes one. */
   url: string | null;
   trackingNumber: string | null;
+  /**
+   * The design asset id actually used (whatever was passed in, or freshly
+   * uploaded) — callers persist this onto Design.printroveDesignId so later
+   * calls can reuse it. Null for providers without this concept.
+   */
+  printroveDesignId: string | null;
 }
 
 export interface VariantOptions {
