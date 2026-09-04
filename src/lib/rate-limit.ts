@@ -46,33 +46,42 @@ function getClientIp(req: Request): string {
 }
 
 /**
- * Fixed-window counter: increments `key`'s bucket for the current window and
- * reports whether it was still under `limit` beforehand. Read-then-write,
- * not a single atomic op — fine here since a race just lets a couple of
- * extra requests through a window rather than bypassing the guard entirely,
- * and the real gate in production is still Basic Auth (proxy.ts).
+ * Fixed-window counter: reports whether `key`'s bucket is still under `limit`
+ * for the current window, without incrementing it. Read-only — the actual
+ * increment happens later via `recordGenerateUsage`, once the caller knows a
+ * paid call actually went through. A race between the peek here and the
+ * later increment just lets a couple of extra requests through a window
+ * rather than bypassing the guard entirely, and the real gate in production
+ * is still Basic Auth (proxy.ts).
  */
-async function incrementAndCheck(key: string, limit: number, windowMs: number): Promise<boolean> {
+async function isUnderLimit(key: string, limit: number, windowMs: number): Promise<boolean> {
+  const windowStart = currentWindowStart(windowMs);
+  const bucketKey = `${key}:${windowStart}`;
+  const existing = await prisma.cache.findUnique({ where: { key: bucketKey } });
+  const count = existing ? (JSON.parse(existing.value).count as number) : 0;
+  return count < limit;
+}
+
+async function increment(key: string, windowMs: number): Promise<void> {
   const windowStart = currentWindowStart(windowMs);
   const bucketKey = `${key}:${windowStart}`;
   const expiresAt = new Date(windowStart + windowMs);
 
   const existing = await prisma.cache.findUnique({ where: { key: bucketKey } });
   const count = existing ? (JSON.parse(existing.value).count as number) : 0;
-  if (count >= limit) return false;
 
   await prisma.cache.upsert({
     where: { key: bucketKey },
     create: { key: bucketKey, value: JSON.stringify({ count: 1 }), expiresAt },
     update: { value: JSON.stringify({ count: count + 1 }), expiresAt },
   });
-  return true;
 }
 
 export interface RateLimitResult {
   ok: boolean;
   sessionId: string;
   isNewSession: boolean;
+  ip: string;
 }
 
 export async function checkGenerateRateLimit(req: Request): Promise<RateLimitResult> {
@@ -84,11 +93,26 @@ export async function checkGenerateRateLimit(req: Request): Promise<RateLimitRes
   const ip = getClientIp(req);
 
   const [sessionOk, ipOk] = await Promise.all([
-    incrementAndCheck(`ratelimit:generate:session:${sessionId}`, maxPerSession, windowMs),
-    incrementAndCheck(`ratelimit:generate:ip:${ip}`, maxPerIp, windowMs),
+    isUnderLimit(`ratelimit:generate:session:${sessionId}`, maxPerSession, windowMs),
+    isUnderLimit(`ratelimit:generate:ip:${ip}`, maxPerIp, windowMs),
   ]);
 
-  return { ok: sessionOk && ipOk, sessionId, isNewSession };
+  return { ok: sessionOk && ipOk, sessionId, isNewSession, ip };
+}
+
+/**
+ * Actually spend one unit of the caller's free-generation budget. Call this
+ * only once the underlying Gemini call is known to have gone through (or
+ * failed for a reason that's on the caller, not on us) — never for a
+ * provider-side 429/503 (Gemini's own quota/capacity, not ours), since that
+ * failure isn't the caller's fault and shouldn't cost them a try.
+ */
+export async function recordGenerateUsage(result: RateLimitResult): Promise<void> {
+  const { windowMs } = settings.rateLimit;
+  await Promise.all([
+    increment(`ratelimit:generate:session:${result.sessionId}`, windowMs),
+    increment(`ratelimit:generate:ip:${result.ip}`, windowMs),
+  ]);
 }
 
 /** Attach the rate-limit session cookie to a response when it's freshly issued. */

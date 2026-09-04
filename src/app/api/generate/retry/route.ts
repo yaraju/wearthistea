@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { renderConceptArt } from "@/lib/gemini";
+import { renderConceptArt, isTransientProviderError } from "@/lib/gemini";
 import type { Concept } from "@/config/prompts";
 import { compositeOnTee } from "@/lib/mockup";
 import { saveImage } from "@/lib/storage";
 import { settings } from "@/config/settings";
-import { checkGenerateRateLimit, setRateLimitCookie } from "@/lib/rate-limit";
+import { checkGenerateRateLimit, recordGenerateUsage, setRateLimitCookie } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -62,7 +62,16 @@ export async function POST(req: Request) {
       color: design.variantColor || settings.printify.defaultColor,
       artStyle: design.style === "svg" ? "svg" : "raster",
     };
-    const designB64 = await renderConceptArt(concept);
+    let designB64: string;
+    try {
+      designB64 = await renderConceptArt(concept);
+      await recordGenerateUsage(rateLimit);
+    } catch (err) {
+      // Gemini's own 429/503 (its quota/capacity, not ours) isn't the
+      // caller's fault — don't spend their free-generation budget on it.
+      if (!isTransientProviderError(err)) await recordGenerateUsage(rateLimit);
+      throw err;
+    }
 
     const base = `${design.id}-${Date.now()}`;
     const designImagePath = await saveImage(design.batchId, `${base}-design.png`, designB64);
@@ -99,14 +108,19 @@ export async function POST(req: Request) {
     setRateLimitCookie(res, rateLimit);
     return res;
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Retry failed.";
+    const transient = isTransientProviderError(err);
+    const message = transient
+      ? "Our design engine is swamped right now — try again in a moment."
+      : err instanceof Error
+        ? err.message
+        : "Retry failed.";
     // Best-effort: this route is now also the initial-render path (not just
     // manual retries), so a design left at "generating" forever after a
     // failure would look stuck rather than failed on a page reload.
     await prisma.design
       .update({ where: { id: designId }, data: { status: "failed", errorMessage: message } })
       .catch(() => {});
-    const res = NextResponse.json({ error: message }, { status: 500 });
+    const res = NextResponse.json({ error: message }, { status: transient ? 503 : 500 });
     setRateLimitCookie(res, rateLimit);
     return res;
   }

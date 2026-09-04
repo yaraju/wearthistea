@@ -1,13 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { generateConcepts } from "@/lib/gemini";
+import { generateConcepts, isTransientProviderError } from "@/lib/gemini";
 import { getProvider } from "@/lib/print-provider";
 import { settings } from "@/config/settings";
 import { prompts } from "@/config/prompts";
 import { langfuse, getTraceId } from "@/lib/langfuse";
 import { logger } from "@/lib/logger";
-import { checkGenerateRateLimit, setRateLimitCookie } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -36,26 +35,18 @@ function resolveCategory(productId?: number): string {
 
 // Health check and main generation logic
 export async function POST(req: Request) {
-  const rateLimit = await checkGenerateRateLimit(req);
-  if (!rateLimit.ok) {
-    const res = NextResponse.json(
-      { error: "You've hit the free-generation limit for now — try again in a bit." },
-      { status: 429 }
-    );
-    setRateLimitCookie(res, rateLimit);
-    return res;
-  }
-
+  // No rate-limit gate here on purpose: this route only writes text concepts
+  // (generateConcepts, a couple of seconds on the cheap flash-lite model) —
+  // the free-generation budget guards the paid image-render calls, which
+  // live in /api/generate/retry and /api/realize instead.
   let body;
   try {
     body = Body.parse(await req.json());
   } catch {
-    const res = NextResponse.json(
+    return NextResponse.json(
       { error: "Spill something first — give us 2–280 characters of tea." },
       { status: 400 }
     );
-    setRateLimitCookie(res, rateLimit);
-    return res;
   }
 
   const { keyword, category, productType, color, style } = body;
@@ -137,16 +128,19 @@ export async function POST(req: Request) {
       count: designs.length,
     });
 
-    const res = NextResponse.json({
+    return NextResponse.json({
       batchId: batch.id,
       keyword,
       designs,
       options: getProvider().options(resolvedCategory),
     });
-    setRateLimitCookie(res, rateLimit);
-    return res;
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Generation failed.";
+    const transient = isTransientProviderError(err);
+    const message = transient
+      ? "Our design engine is swamped right now — try again in a moment."
+      : err instanceof Error
+        ? err.message
+        : "Generation failed.";
     trace.update({
       tags: ["error"],
       output: { error: message },
@@ -155,8 +149,6 @@ export async function POST(req: Request) {
       traceId,
       error: err,
     });
-    const res = NextResponse.json({ error: message }, { status: 500 });
-    setRateLimitCookie(res, rateLimit);
-    return res;
+    return NextResponse.json({ error: message }, { status: transient ? 503 : 500 });
   }
 }

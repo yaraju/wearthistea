@@ -3,7 +3,7 @@ import { z } from "zod";
 import { realizeDesign } from "@/lib/realize";
 import { langfuse, getTraceId } from "@/lib/langfuse";
 import { logger } from "@/lib/logger";
-import { checkGenerateRateLimit, setRateLimitCookie } from "@/lib/rate-limit";
+import { checkGenerateRateLimit, recordGenerateUsage, setRateLimitCookie } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -52,7 +52,26 @@ export async function POST(req: Request) {
   try {
     const realized = await realizeDesign(designId, trace);
 
+    // realizeDesign() catches its own Gemini errors rather than throwing —
+    // Gemini's own 429/503 (its quota/capacity, not ours) isn't the caller's
+    // fault, so it shouldn't spend their free-generation budget either.
+    const transientFailure = realized.status === "failed" && Boolean(realized.transientProviderError);
+    if (!transientFailure) await recordGenerateUsage(rateLimit);
+
     trace.update({ output: { designId, status: realized.status } });
+
+    if (transientFailure) {
+      logger.error(`[Stage 2] Realization hit provider capacity for design ${designId}`, {
+        traceId,
+        designId,
+      });
+      const res = NextResponse.json(
+        { error: "Our design engine is swamped right now — try again in a moment." },
+        { status: 503 }
+      );
+      setRateLimitCookie(res, rateLimit);
+      return res;
+    }
 
     logger.info(`[Stage 2] Successfully realized design: ${designId}`, {
       traceId,

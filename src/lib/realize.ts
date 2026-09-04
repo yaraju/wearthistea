@@ -1,5 +1,5 @@
 import { prisma } from "./prisma";
-import { renderConceptArt } from "./gemini";
+import { renderConceptArt, isTransientProviderError } from "./gemini";
 import { settings } from "@/config/settings";
 import { prompts, type Concept } from "@/config/prompts";
 import { saveImage } from "./storage";
@@ -106,17 +106,20 @@ export async function realizeDesign(designId: string, parent?: any) {
     });
 
     observation.end({ output: "success" });
-    return updated;
+    return { ...updated, transientProviderError: false };
 
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
     observation.end({ level: "error", statusMessage: errorMessage });
-    return await prisma.design.update({
+    const failed = await prisma.design.update({
       where: { id: designId },
       data: {
         status: "failed",
         errorMessage,
       },
     });
+    // Not persisted — read by /api/realize to decide whether this attempt
+    // should count against the caller's free-generation budget.
+    return { ...failed, transientProviderError: isTransientProviderError(err) };
   }
 }

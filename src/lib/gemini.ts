@@ -11,6 +11,19 @@ function hasApiKey(): boolean {
   return Boolean(process.env.GEMINI_API_KEY);
 }
 
+/**
+ * True when `err` is Gemini itself returning 429 (its own quota, not our
+ * free-generation rate limit) or 503 (its capacity — "high demand"). The SDK
+ * surfaces these as an `ApiError` with `.status` set to the HTTP status code
+ * (see @google/genai's throwErrorIfNotOK). Callers use this to distinguish
+ * "the provider is overloaded" from an actual caller-side failure, since the
+ * former isn't the caller's fault and shouldn't burn their generation budget.
+ */
+export function isTransientProviderError(err: unknown): boolean {
+  const status = (err as { status?: number } | null)?.status;
+  return status === 429 || status === 503;
+}
+
 export function ai(): GoogleGenAI {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
