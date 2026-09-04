@@ -1,3 +1,19 @@
+// A saved shipping address on a signed-in customer's account.
+export interface AddressDTO {
+  id: string;
+  label: string | null;
+  name: string;
+  phone: string;
+  address1: string;
+  address2: string | null;
+  address3: string | null;
+  city: string | null;
+  state: string | null;
+  pincode: string | null;
+  country: string;
+  isDefault: boolean;
+}
+
 // Shape of a Design as returned by the API to the client. Purely creative/
 // generation content — order/purchase details live on OrderDTO instead.
 export interface DesignDTO {

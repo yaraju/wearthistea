@@ -12,5 +12,6 @@ export async function GET(req: Request) {
     signedIn: Boolean(session),
     email: session?.email ?? null,
     uid: session?.uid ?? null,
+    authProvider: session?.firebase?.sign_in_provider ?? null,
   });
 }

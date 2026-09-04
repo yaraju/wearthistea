@@ -9,6 +9,11 @@ import { getFirebaseAuth } from "@/lib/firebase-client";
 // documented pattern for its email-link flow (see auth/verify/page.tsx).
 export const EMAIL_FOR_SIGN_IN_KEY = "wt_emailForSignIn";
 
+// Matches KeywordStudio.tsx's FIELD_CLS — kept as a separate copy rather
+// than a cross-file export for one shared string.
+const FIELD_CLS =
+  "w-full rounded-lg border border-line bg-paper px-3 py-2 font-mono text-xs text-ink placeholder:text-ink-soft/60 focus:border-ink focus:outline-none";
+
 /**
  * Customer sign-in, offered as a choice per the product call: Google is
  * instant (one popup, no email round-trip); email-link is slower (customer
@@ -78,28 +83,28 @@ export default function CustomerSignIn({ onSignedIn }: { onSignedIn: () => void 
 
   if (linkSent) {
     return (
-      <div className="text-sm text-ink-soft">
-        <p>Check <strong>{email}</strong> for a sign-in link.</p>
+      <div className="font-mono text-xs text-ink-soft">
+        <p>Check <strong className="text-ink">{email}</strong> for a sign-in link.</p>
         <p className="mt-1">You can close this — the link will bring you back here signed in.</p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2.5">
       <button
         type="button"
         onClick={signInWithGoogle}
         disabled={busy !== null}
-        className="w-full rounded bg-black px-3 py-2 text-sm text-white disabled:opacity-50"
+        className="w-full rounded-lg bg-ink px-3 py-2 font-mono text-xs font-bold uppercase tracking-widest text-paper disabled:opacity-50"
       >
         {busy === "google" ? "Signing in…" : "Continue with Google"}
       </button>
 
-      <div className="flex items-center gap-2 text-xs text-ink-soft">
-        <span className="h-px flex-1 bg-ink-soft/20" />
+      <div className="flex items-center gap-2 font-mono text-[11px] text-ink-soft">
+        <span className="h-px flex-1 bg-line" />
         or
-        <span className="h-px flex-1 bg-ink-soft/20" />
+        <span className="h-px flex-1 bg-line" />
       </div>
 
       <form onSubmit={sendEmailLink} className="flex gap-2">
@@ -109,18 +114,18 @@ export default function CustomerSignIn({ onSignedIn }: { onSignedIn: () => void 
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="you@example.com"
-          className="flex-1 rounded border border-ink-soft/30 px-3 py-2 text-sm"
+          className={FIELD_CLS}
         />
         <button
           type="submit"
           disabled={busy !== null}
-          className="rounded border border-ink-soft/30 px-3 py-2 text-sm disabled:opacity-50"
+          className="shrink-0 rounded-lg border border-line px-3 py-2 font-mono text-xs text-ink disabled:opacity-50"
         >
           {busy === "email" ? "Sending…" : "Email me a link"}
         </button>
       </form>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="font-mono text-xs text-pink-ink">{error}</p>}
     </div>
   );
 }

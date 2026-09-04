@@ -261,10 +261,12 @@ Two separate, auto-provisioned queues so email and Printrove-product workloads c
 - **Live infra change** (explicit user approval obtained first): Firebase project's email/password provider had `passwordRequired` effectively `true` — passwordless email-link sign-in was not actually enabled, despite `auth.ts`'s comment claiming it was. Flipped via the Identity Toolkit Admin API (`PATCH .../config?updateMask=signIn.email.passwordRequired`, body `passwordRequired:false`). Verified empirically end-to-end: `generateSignInWithEmailLink` now succeeds against the live project and produces a correctly-shaped link.
 - `npm run build` clean (Turbopack) — new routes compile and appear in the route table.
 
-### Step 4: Address book (Track B)
-- `GET/POST /api/account/addresses`, `GET /api/account/me`.
-- `/account` page.
-- Checkout integration: snippet/switcher/add-another in the (soon-to-exist) pick modal.
+### ✓ Step 4: Address book (Track B) — checkout wiring deferred to Step 6
+- `GET/POST /api/account/addresses` (list; create, with a transaction that guarantees exactly one `isDefault` — the first address saved is always default regardless of what's passed; verified live against the real DB, not just typechecked).
+- `/account` page: sign-in gate (reuses `CustomerSignIn`), email + provider, saved addresses list, add-address form.
+- `AddressDTO` added to `src/lib/types.ts`.
+- `npm run build` clean.
+- **Not done yet, by design**: the snippet/switcher/"add another" wiring *inside checkout* doesn't exist yet — there's no pick-modal for it to live in until Step 6 replaces `DesignCard`'s inline form. The backend (this step) is ready for it.
 
 ### Step 5: PrintRove product orchestration (Track C, provisioning half)
 - `src/lib/design-products.ts` (`ensureDesignProduct`), `getProduct()` in `printrove.ts`, `FulfillInput`/`FulfillResult` gain `printroveDesignId` passthrough.
