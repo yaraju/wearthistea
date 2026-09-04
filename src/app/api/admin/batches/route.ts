@@ -20,6 +20,7 @@ export async function GET(req: Request) {
         design: {
           include: { batch: { select: { keyword: true, createdAt: true } } },
         },
+        designProduct: { select: { mockupFrontUrl: true } },
       },
       take: 200,
     });
@@ -30,7 +31,7 @@ export async function GET(req: Request) {
     });
 
     return NextResponse.json({
-      orders: orders.map(({ design, ...o }) => ({
+      orders: orders.map(({ design, designProduct, ...o }) => ({
         ...o,
         title: design.title,
         phrase: design.phrase,
@@ -38,6 +39,7 @@ export async function GET(req: Request) {
         productImagePath: design.productImagePath,
         designImagePath: design.designImagePath,
         hasImageData: Boolean(design.designImageData),
+        printroveMockupUrl: designProduct?.mockupFrontUrl ?? null,
         batch: design.batch,
       })),
       counts: Object.fromEntries(counts.map((c) => [c.status, c._count._all])),

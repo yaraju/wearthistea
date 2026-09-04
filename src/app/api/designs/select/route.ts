@@ -5,6 +5,8 @@ import { settings, printroveProduct } from "@/config/settings";
 import { realizeDesign } from "@/lib/realize";
 import { computeGst } from "@/lib/gst";
 import { ensureDesignProduct } from "@/lib/design-products";
+import { pushOrderToProvider } from "@/lib/fulfillment";
+import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
 
@@ -148,7 +150,7 @@ export async function POST(req: Request) {
   // almost always already created by the pick modal's preview poll before
   // the buyer ever got here, so this is normally just a cache read. Its
   // approvalStatus determines whether this order can skip the human queue
-  // (see fulfillment.ts's pushOrderToProvider, wired in a later step).
+  // (below, for COD — prepaid still waits for payment regardless).
   const designProduct =
     settings.provider === "printrove"
       ? await ensureDesignProduct(body.designId, body.category)
@@ -191,5 +193,23 @@ export async function POST(req: Request) {
     data: { status: "queued" },
   });
 
-  return NextResponse.json({ ok: true, order });
+  // Already-approved + COD skips the human queue entirely — this is the
+  // actual payoff of product-level approval: a repeat buyer of an already-
+  // reviewed (design, category, color) combo ships without an admin
+  // touching it. Prepaid orders never auto-fulfill here regardless of
+  // approval — they wait for payment (pending_payment), and the same
+  // cascade that flushes pending COD orders on approval also covers a
+  // prepaid order once it's paid and lands in the queue as "pending".
+  // Never fails the request if this errors — the order is created either
+  // way; it just falls back to sitting in the admin queue like normal.
+  let finalOrder = order;
+  if (designProduct?.approvalStatus === "approved" && !prepaid) {
+    const pushed = await pushOrderToProvider(order.id).catch((err) => {
+      logger.error("[designs/select] Auto-fulfill failed", { orderId: order.id, error: err });
+      return null;
+    });
+    if (pushed?.ok) finalOrder = pushed.order;
+  }
+
+  return NextResponse.json({ ok: true, order: finalOrder });
 }

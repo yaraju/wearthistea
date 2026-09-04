@@ -46,6 +46,10 @@ export interface OrderDTO {
   productImagePath: string;
   designImagePath: string;
   hasImageData?: boolean;
+  // The real Printrove mockup for this order's (design, category, color)
+  // combo, when its DesignProduct has one ready — preferred over the
+  // generic composite above when present.
+  printroveMockupUrl: string | null;
   batch: { keyword: string; createdAt: string };
 
   productCategory: string;

@@ -12,8 +12,18 @@ import {
 } from "lucide-react";
 import type { OrderDTO } from "@/lib/types";
 import AdminLogin from "@/components/AdminLogin";
+import AdminReviewModal from "@/components/AdminReviewModal";
 
 type Row = OrderDTO;
+
+interface PendingReviewDesign {
+  id: string;
+  title: string;
+  phrase: string;
+  designImagePath: string;
+  productImagePath: string;
+  products: { id: string; category: string; label: string; status: string }[];
+}
 
 const FILTERS = ["pending", "published", "rejected", "failed", "all"] as const;
 type Filter = (typeof FILTERS)[number];
@@ -95,6 +105,24 @@ function AdminQueue({ onSignOut }: { onSignOut: () => void }) {
     load();
   }, [load]);
 
+  const [reviewDesigns, setReviewDesigns] = useState<PendingReviewDesign[]>([]);
+  const [openReview, setOpenReview] = useState<PendingReviewDesign | null>(null);
+
+  const loadReviewDesigns = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/designs/pending-review", { cache: "no-store" });
+      const data = await res.json().catch(() => ({}));
+      setReviewDesigns(data.designs ?? []);
+    } catch {
+      setReviewDesigns([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadReviewDesigns();
+  }, [loadReviewDesigns]);
+
   return (
     <main className="min-h-screen">
       <header className="border-b-2 border-ink bg-ink text-paper">
@@ -127,6 +155,55 @@ function AdminQueue({ onSignOut }: { onSignOut: () => void }) {
       </header>
 
       <div className="mx-auto max-w-6xl px-5 py-8">
+        {/* Content review — approve/reject a (design, apparel type, color)
+            combo once, covers every current + future buyer of that combo.
+            Only shows designs with a real order waiting on a decision. */}
+        {reviewDesigns.length > 0 && (
+          <div className="mb-8">
+            <h2 className="kicker mb-2 text-ink-soft">needs review</h2>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {reviewDesigns.map((d) => {
+                const img = d.designImagePath || d.productImagePath;
+                return (
+                  <button
+                    key={d.id}
+                    onClick={() => setOpenReview(d)}
+                    className="sticker flex items-center gap-3 rounded-xl bg-paper-2 p-3 text-left transition-transform duration-200 hover:-translate-y-0.5"
+                  >
+                    {img && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={img}
+                        alt={d.title}
+                        className="h-14 w-14 shrink-0 rounded-lg object-contain"
+                      />
+                    )}
+                    <div className="min-w-0">
+                      <p className="truncate font-display text-sm font-bold">{d.title}</p>
+                      <p className="font-mono text-[11px] text-ink-soft">
+                        {d.products.length} apparel type{d.products.length === 1 ? "" : "s"} pending
+                      </p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {openReview && (
+          <AdminReviewModal
+            design={openReview}
+            items={openReview.products}
+            onClose={() => setOpenReview(null)}
+            onDone={() => {
+              setOpenReview(null);
+              loadReviewDesigns();
+              load();
+            }}
+          />
+        )}
+
         {/* Filters */}
         <div className="mb-8 flex flex-wrap gap-2">
           {FILTERS.map((f) => {
@@ -211,7 +288,7 @@ function QueueCard({ row, onChange }: { row: Row; onChange: () => void }) {
     }
   }
 
-  const img = row.productImagePath || row.designImagePath;
+  const img = row.printroveMockupUrl || row.productImagePath || row.designImagePath;
   const isPending = row.status === "pending";
   const isFailed = row.status === "failed";
   const hasArtwork = Boolean(row.hasImageData);
