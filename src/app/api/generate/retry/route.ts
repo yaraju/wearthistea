@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { renderConceptArt, isTransientProviderError } from "@/lib/gemini";
 import type { Concept } from "@/config/prompts";
 import { compositeOnTee } from "@/lib/mockup";
-import { saveImage } from "@/lib/storage";
+import { saveImage, hasDurableStorage } from "@/lib/storage";
 import { settings } from "@/config/settings";
 import { checkGenerateRateLimit, recordGenerateUsage, setRateLimitCookie } from "@/lib/rate-limit";
 import { enqueuePrintroveProducts } from "@/lib/tasks";
@@ -100,7 +100,11 @@ export async function POST(req: Request) {
       data: {
         designImagePath,
         productImagePath,
-        designImageData: designB64,
+        // Only needed as a lost-file fallback on ephemeral local disk — once
+        // GCS is configured, saveImage() above already either durably
+        // persisted this or threw, so storing a second copy here would just
+        // be permanent, ever-growing database bloat for no benefit.
+        designImageData: hasDurableStorage ? null : designB64,
         status: "generated",
         errorMessage: null,
       },

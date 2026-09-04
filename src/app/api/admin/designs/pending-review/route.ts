@@ -44,6 +44,7 @@ export async function GET(req: Request) {
       phrase: d.phrase,
       designImagePath: d.designImagePath,
       productImagePath: d.productImagePath,
+      variantColor: d.variantColor,
       products: d.designProducts.map((p) => ({
         id: p.id,
         category: p.category,

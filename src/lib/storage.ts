@@ -5,6 +5,14 @@ import { Storage } from "@google-cloud/storage";
 const GCS_BUCKET = process.env.GCS_BUCKET;
 const storage = GCS_BUCKET ? new Storage() : null;
 
+/** Whether saved images land somewhere that survives a redeploy (GCS) vs.
+ * the ephemeral local disk fallback. Callers use this to decide whether a
+ * base64 copy in the database is still needed as a lost-file fallback —
+ * once GCS is configured, saveImage() either succeeds durably or throws
+ * before the caller ever gets a path back, so that fallback stops being
+ * necessary and just costs database storage instead. */
+export const hasDurableStorage = Boolean(GCS_BUCKET);
+
 // Where generated artwork lives on disk.
 //
 //   • Local dev (default): ./public/generated — served straight off the public

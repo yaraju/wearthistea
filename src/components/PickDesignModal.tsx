@@ -269,6 +269,7 @@ export default function PickDesignModal({
               category={category}
               brewedImageUrl={brewedImg}
               brewedImageAlt={`${design.title} — design art`}
+              garmentColor={design.variantColor || "Black"}
               showDisclaimer
             />
           ) : (

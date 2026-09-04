@@ -16,6 +16,7 @@ interface DesignSummary {
   phrase: string;
   designImagePath: string;
   productImagePath: string;
+  variantColor: string | null;
 }
 
 /**
@@ -115,6 +116,7 @@ export default function AdminReviewModal({
                 category={it.category}
                 brewedImageUrl={brewedImg}
                 brewedImageAlt={`${design.title} — ${it.label}`}
+                garmentColor={design.variantColor || "Black"}
               />
               {decided[it.id] ? (
                 <p

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import type { DesignProductDTO } from "@/lib/types";
+import { getColorCode } from "@/lib/colors";
 
 /**
  * Polls GET /api/designs/[id]/product?category=X and renders a carousel:
@@ -15,6 +16,7 @@ export default function DesignProductPreview({
   category,
   brewedImageUrl,
   brewedImageAlt,
+  garmentColor,
   showDisclaimer = false,
   onStatus,
 }: {
@@ -22,6 +24,12 @@ export default function DesignProductPreview({
   category: string;
   brewedImageUrl: string;
   brewedImageAlt: string;
+  /** The color this design's art was actually rendered against (Design.
+   * variantColor) — the brewed slide is a transparent PNG, so without this
+   * it renders on a flat neutral background that doesn't match the garment
+   * it'll actually print on. Only applied to the brewed slide; Printrove's
+   * mockup slides are already full photos with their own background. */
+  garmentColor: string;
   showDisclaimer?: boolean;
   onStatus?: (data: DesignProductDTO) => void;
 }) {
@@ -91,10 +99,16 @@ export default function DesignProductPreview({
     (s): s is string => Boolean(s)
   );
   const current = slides[slide] ?? brewedImageUrl;
+  // Only the brewed slide (index 0, a transparent PNG) needs the garment
+  // color behind it — the mockup slides are already complete photos.
+  const isBrewedSlide = current === brewedImageUrl;
 
   return (
     <div>
-      <div className="relative aspect-[4/5] overflow-hidden rounded-xl bg-paper-2">
+      <div
+        className="relative aspect-[4/5] overflow-hidden rounded-xl bg-paper-2"
+        style={isBrewedSlide ? { backgroundColor: getColorCode(garmentColor) } : undefined}
+      >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={current}

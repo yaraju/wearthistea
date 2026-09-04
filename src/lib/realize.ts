@@ -2,7 +2,7 @@ import { prisma } from "./prisma";
 import { renderConceptArt, isTransientProviderError } from "./gemini";
 import { settings } from "@/config/settings";
 import { prompts, type Concept } from "@/config/prompts";
-import { saveImage } from "./storage";
+import { saveImage, hasDurableStorage } from "./storage";
 import { svgToPng } from "./svg-utils";
 import { compositeOnTee } from "./mockup";
 import { langfuse } from "./langfuse";
@@ -96,7 +96,9 @@ export async function realizeDesign(designId: string, parent?: any) {
       data: {
         designImagePath,
         productImagePath,
-        designImageData: finalDesignB64,
+        // See the identical comment in /api/generate/retry — only needed as
+        // a lost-file fallback when GCS isn't configured.
+        designImageData: hasDurableStorage ? null : finalDesignB64,
         status: finalStatus,
         // Keep designPrompt replayable: for the raster path, store the exact
         // prompt that produced this art (so a later retry reproduces it);
