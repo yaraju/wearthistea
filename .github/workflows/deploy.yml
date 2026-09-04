@@ -76,7 +76,7 @@ jobs:
           # concurrency and a shorter backoff ceiling.
           ensure_queue "$EMAIL_QUEUE" \
             --max-attempts=5 \
-            --max-retry-duration=1h \
+            --max-retry-duration=3600s \
             --min-backoff=10s \
             --max-backoff=300s \
             --max-doublings=4 \
@@ -90,7 +90,7 @@ jobs:
           # transient Printrove outage shouldn't lose the task.
           ensure_queue "$PRINTROVE_QUEUE" \
             --max-attempts=3 \
-            --max-retry-duration=3h \
+            --max-retry-duration=10800s \
             --min-backoff=30s \
             --max-backoff=600s \
             --max-doublings=3 \
