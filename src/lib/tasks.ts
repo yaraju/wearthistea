@@ -10,12 +10,14 @@ let client: CloudTasksClient | null = null;
  * proxy timeout: a slow outbound call shouldn't hold open a payment
  * webhook or checkout response.
  *
- * Falls back to sending inline when CLOUD_TASKS_QUEUE isn't configured
+ * Falls back to sending inline when CLOUD_TASKS_QUEUE_EMAIL isn't configured
  * (e.g. local dev, before `gcloud tasks queues create` has been run) —
  * degraded (synchronous), but still sends, rather than silently dropping
- * the email until the queue exists. */
+ * the email until the queue exists. Deliberately a separate queue from
+ * Printrove product-library creation (CLOUD_TASKS_QUEUE_PRINTROVE) — the two
+ * workloads want different retry/concurrency tuning; see deploy.yml. */
 export async function enqueueEmail(payload: EmailPayload): Promise<void> {
-  const queueName = process.env.CLOUD_TASKS_QUEUE;
+  const queueName = process.env.CLOUD_TASKS_QUEUE_EMAIL;
   const siteUrl = process.env.SITE_URL;
   const sharedSecret = process.env.TASKS_SHARED_SECRET;
 

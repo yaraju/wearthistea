@@ -9,6 +9,9 @@ Enable the following APIs in your GCP Console:
 - Cloud Storage API
 - Firebase Hosting API
 - IAM Service Account Credentials API (iamcredentials.googleapis.com)
+- Cloud Tasks API (cloudtasks.googleapis.com) — the deploy workflow also
+  enables this itself on every run, so this is a one-time head start, not
+  a strict prerequisite.
 
 > **Note:** Ensure you have initialized Firebase in your project by visiting the [Firebase Console](https://console.firebase.google.com/), selecting your project, and clicking on "Hosting" to create the first site. The site ID should match your Project ID for the default deployment configuration.
 
@@ -42,7 +45,7 @@ gcloud iam service-accounts create github-actions-deploy \
     --display-name="GitHub Actions Deploy"
 
 # Add required roles
-for ROLE in run.admin storage.admin artifactregistry.admin iam.serviceAccountUser firebasehosting.admin cloudconfig.viewer iam.serviceAccountTokenCreator resourcemanager.projectViewer; do
+for ROLE in run.admin storage.admin artifactregistry.admin iam.serviceAccountUser firebasehosting.admin cloudconfig.viewer iam.serviceAccountTokenCreator resourcemanager.projectViewer cloudtasks.admin serviceusage.serviceUsageAdmin; do
   gcloud projects add-iam-policy-binding <PROJECT_ID> \
       --member="serviceAccount:github-actions-deploy@<PROJECT_ID>.iam.gserviceaccount.com" \
       --role="roles/$ROLE"
@@ -109,6 +112,34 @@ Add the following secrets to your GitHub repository:
 - `PRINTROVE_VARIANT_MAP`: JSON mapping `"Color|Size"` to Printrove variant ID.
 - `BASIC_AUTH_USER`: Username for the site gate.
 - `BASIC_AUTH_PASSWORD`: Password for the site gate.
+- `CLOUD_TASKS_QUEUE_EMAIL`: Cloud Tasks queue name for async email (e.g. `email`).
+  The deploy workflow creates/reconciles this queue automatically — you only
+  need to pick a name here.
+- `CLOUD_TASKS_QUEUE_PRINTROVE`: Cloud Tasks queue name for Printrove
+  product-library creation (e.g. `printrove-products`). Kept separate from
+  the email queue so the two workloads can have different retry/concurrency
+  tuning — see the "Ensure Cloud Tasks queues" step in `deploy.yml`. Also
+  auto-created by the deploy workflow.
+- `SITE_URL`: The publicly reachable base URL Cloud Tasks calls back into
+  (e.g. `https://wearthistea.web.app`) — both queues' task handlers live
+  under this origin.
+- `TASKS_SHARED_SECRET`: Any random string (e.g. `openssl rand -hex 32`).
+  Sent back by Cloud Tasks as the `X-Task-Secret` header and checked by the
+  task-handler routes (`/api/tasks/*`) since Cloud Tasks can't authenticate
+  as a signed-in site user. Shared across both queues.
 
 ## 6. Cloud Run Service Account
 Ensure the default Compute Engine service account (or the one used by Cloud Run) has `Storage Object Admin` permissions for the GCS bucket.
+
+It also needs `roles/cloudtasks.enqueuer` — this is the identity Cloud Run
+code actually runs as at request time (separate from `github-actions-deploy`,
+which only needs queue-admin rights to *provision* the queues during deploy).
+Without this role, `enqueueEmail()` / the Printrove-task equivalent will
+fail to call `createTask` and — for email — fall back to sending inline;
+there's no such fallback for Printrove product-library creation, so this
+role is required once that queue is in use, not just nice to have.
+```bash
+gcloud projects add-iam-policy-binding <PROJECT_ID> \
+    --member="serviceAccount:<CLOUD_RUN_RUNTIME_SA>" \
+    --role="roles/cloudtasks.enqueuer"
+```

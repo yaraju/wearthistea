@@ -43,6 +43,60 @@ jobs:
         run: |
           gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
 
+      - name: Ensure Cloud Tasks queues
+        shell: bash
+        env:
+          EMAIL_QUEUE: ${{ secrets.CLOUD_TASKS_QUEUE_EMAIL }}
+          PRINTROVE_QUEUE: ${{ secrets.CLOUD_TASKS_QUEUE_PRINTROVE }}
+        run: |
+          gcloud services enable cloudtasks.googleapis.com --project="${{ env.PROJECT_ID }}"
+
+          # Idempotent: create the queue if it's missing, otherwise just
+          # reconcile its config — so retry-tuning changes here take effect
+          # on the next deploy without a manual `gcloud tasks queues update`.
+          ensure_queue() {
+            local name="$1"; shift
+            if [ -z "$name" ]; then
+              echo "Skipping queue creation — no queue name secret set." >&2
+              return
+            fi
+            if gcloud tasks queues describe "$name" \
+                --location="${{ env.REGION }}" --project="${{ env.PROJECT_ID }}" >/dev/null 2>&1; then
+              echo "Queue '$name' already exists — reconciling its config."
+              gcloud tasks queues update "$name" \
+                --location="${{ env.REGION }}" --project="${{ env.PROJECT_ID }}" "$@"
+            else
+              echo "Queue '$name' not found — creating it."
+              gcloud tasks queues create "$name" \
+                --location="${{ env.REGION }}" --project="${{ env.PROJECT_ID }}" "$@"
+            fi
+          }
+
+          # Email: light HTTP calls to SendGrid, fine to run with more
+          # concurrency and a shorter backoff ceiling.
+          ensure_queue "$EMAIL_QUEUE" \
+            --max-attempts=5 \
+            --max-retry-duration=1h \
+            --min-backoff=10s \
+            --max-backoff=300s \
+            --max-doublings=4 \
+            --max-concurrent-dispatches=10 \
+            --max-dispatches-per-second=5
+
+          # Printrove product-library creation: an upload + several
+          # sequential create-product calls per task against a third-party
+          # API — deliberately throttled so we don't hammer Printrove across
+          # many designs at once, and given a longer retry window since a
+          # transient Printrove outage shouldn't lose the task.
+          ensure_queue "$PRINTROVE_QUEUE" \
+            --max-attempts=3 \
+            --max-retry-duration=3h \
+            --min-backoff=30s \
+            --max-backoff=600s \
+            --max-doublings=3 \
+            --max-concurrent-dispatches=3 \
+            --max-dispatches-per-second=1
+
       - name: Prepare Env Vars
         id: prep
         shell: bash
@@ -101,7 +155,8 @@ jobs:
             RAZORPAY_WEBHOOK_SECRET=${{ secrets.RAZORPAY_WEBHOOK_SECRET }}
             SENDGRID_API_KEY=${{ secrets.SENDGRID_API_KEY }}
             EMAIL_FROM=${{ secrets.EMAIL_FROM }}
-            CLOUD_TASKS_QUEUE=${{ secrets.CLOUD_TASKS_QUEUE }}
+            CLOUD_TASKS_QUEUE_EMAIL=${{ secrets.CLOUD_TASKS_QUEUE_EMAIL }}
+            CLOUD_TASKS_QUEUE_PRINTROVE=${{ secrets.CLOUD_TASKS_QUEUE_PRINTROVE }}
             GCP_PROJECT_ID=${{ env.PROJECT_ID }}
             GCP_REGION=${{ env.REGION }}
             SITE_URL=${{ secrets.SITE_URL }}
