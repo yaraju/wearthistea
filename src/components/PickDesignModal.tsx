@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Loader2, ArrowRight, X } from "lucide-react";
 import type { DesignDTO, AddressDTO, CatalogCategoryOption } from "@/lib/types";
 import CustomerSignIn from "@/components/CustomerSignIn";
@@ -30,6 +30,7 @@ function loadRazorpayScript(): Promise<void> {
   return razorpayScriptPromise;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- response shape varies per endpoint, matches the same helper's established typing in KeywordStudio.tsx
 async function parseJsonResponse(res: Response): Promise<any> {
   const contentType = res.headers.get("content-type") || "";
   if (!contentType.includes("application/json")) {
@@ -70,6 +71,29 @@ export default function PickDesignModal({
   const brewedImg = design.designImagePath || design.productImagePath;
   const selectedCategory = categories?.find((c) => c.category === category) ?? null;
 
+  const loadAddresses = useCallback(async () => {
+    const res = await fetch("/api/account/addresses", { cache: "no-store" });
+    const data = await res.json().catch(() => ({ addresses: [] }));
+    const list: AddressDTO[] = data.addresses ?? [];
+    setAddresses(list);
+    if (list.length === 0) {
+      setAddingAddress(true);
+    } else {
+      setSelectedAddressId((prev) => prev ?? list.find((a) => a.isDefault)?.id ?? list[0].id);
+    }
+  }, []);
+
+  const checkAccount = useCallback(async () => {
+    try {
+      const res = await fetch("/api/account/me", { cache: "no-store" });
+      const data = await res.json();
+      setMe(data.signedIn ? { signedIn: true, email: data.email } : { signedIn: false, email: null });
+      if (data.signedIn) await loadAddresses();
+    } catch {
+      setMe({ signedIn: false, email: null });
+    }
+  }, [loadAddresses]);
+
   useEffect(() => {
     fetch("/api/catalog")
       .then((res) => res.json())
@@ -83,31 +107,9 @@ export default function PickDesignModal({
       })
       .catch(() => setCategories([]));
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     checkAccount();
-  }, []);
-
-  async function checkAccount() {
-    try {
-      const res = await fetch("/api/account/me", { cache: "no-store" });
-      const data = await res.json();
-      setMe(data.signedIn ? { signedIn: true, email: data.email } : { signedIn: false, email: null });
-      if (data.signedIn) await loadAddresses();
-    } catch {
-      setMe({ signedIn: false, email: null });
-    }
-  }
-
-  async function loadAddresses() {
-    const res = await fetch("/api/account/addresses", { cache: "no-store" });
-    const data = await res.json().catch(() => ({ addresses: [] }));
-    const list: AddressDTO[] = data.addresses ?? [];
-    setAddresses(list);
-    if (list.length === 0) {
-      setAddingAddress(true);
-    } else {
-      setSelectedAddressId((prev) => prev ?? list.find((a) => a.isDefault)?.id ?? list[0].id);
-    }
-  }
+  }, [checkAccount]);
 
   function onCategoryChange(next: string) {
     setCategory(next);
@@ -236,7 +238,7 @@ export default function PickDesignModal({
         <div className="mb-3 flex items-start justify-between gap-3">
           <div>
             <h3 className="font-display text-lg font-bold">{design.title}</h3>
-            <p className="font-mono text-xs text-ink-soft">"{design.phrase}"</p>
+            <p className="font-mono text-xs text-ink-soft">“{design.phrase}”</p>
           </div>
           <button onClick={onClose} aria-label="Close" className="shrink-0 text-ink-soft hover:text-ink">
             <X className="h-5 w-5" aria-hidden />

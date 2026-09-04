@@ -31,6 +31,9 @@ export default function DesignProductPreview({
 
   useEffect(() => {
     let cancelled = false;
+    // Reset transient preview state when the category changes — intentional
+    // synchronous reset-on-dependency-change, not state derivable another way.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setData(null);
     setSlide(0);
 
@@ -129,7 +132,7 @@ export default function DesignProductPreview({
       {showDisclaimer && (
         <p className="mt-2 text-center font-mono text-[10px] leading-relaxed text-ink-soft">
           Preview is indicative — actual print color, placement, and size may
-          vary slightly from what's shown here.
+          vary slightly from what&apos;s shown here.
         </p>
       )}
     </div>

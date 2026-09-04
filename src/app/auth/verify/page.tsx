@@ -53,6 +53,7 @@ export default function VerifyPage() {
   useEffect(() => {
     const auth = getFirebaseAuth();
     if (!isSignInWithEmailLink(auth, window.location.href)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setError("This isn't a valid sign-in link.");
       setStatus("error");
       return;
@@ -68,7 +69,6 @@ export default function VerifyPage() {
     } else {
       setStatus("needs-email");
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
