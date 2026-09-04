@@ -1,5 +1,7 @@
 # Requirements
 
+**Status: all 7 delivery steps complete** (see Delivery Steps at the bottom — each is marked ✓ with what was built, what was verified live, and any bugs live-testing caught). `npm run build` and `npx eslint` both clean as of the last commit on this branch. Not done, on purpose: Razorpay webhook auto-fulfill-on-payment, a second garment color, `/account` order history, address edit/delete, un-rejecting a `DesignProduct` — see the note at the end of Delivery Steps.
+
 ### Overview & Goals
 Two originally-separate asks turned out to share a checkout surface, so they're planned together:
 
