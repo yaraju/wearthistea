@@ -68,13 +68,67 @@ model Design {
   // Order's errorMessage, which covers approval/fulfillment failures.
   errorMessage String? @db.Text
 
-  orders Order[]
+  // Printrove's uploaded design asset id — set once (on first upload) and
+  // reused for every (category, color) DesignProduct below, since the
+  // upload itself doesn't depend on category or size. Never re-uploaded
+  // once set — see fulfillment.ts / design-products.ts.
+  printroveDesignId Int?
+
+  orders         Order[]
+  designProducts DesignProduct[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([status])
   @@index([batchId])
+}
+
+// One real Printrove Product Library entry + mockup for a (design, category,
+// color) combo, and the unit of admin content-approval. Deliberately NOT
+// keyed by size: settings.printrove.products[category].print is a single
+// fixed placement box per category, so two sizes of the same design/
+// category/color are the identical artwork at the identical coordinates on
+// a differently-sized blank — verified live (two Printrove products created
+// from the same uploaded design at Men's S and Men's XL produced pixel-
+// identical mockups). previewSize records which size the mockup happens to
+// have been built from — provenance only, not part of this row's identity.
+//
+// approvalStatus is content moderation, decoupled from any single Order:
+// approve a combo once and every current + future Order for it (any size)
+// can auto-fulfill — see fulfillment.ts's pushOrderToProvider and the
+// approve/approve-all cascade in the admin API. Approving this row must
+// NEVER cause printroveProductId/printroveVariantId (built at previewSize)
+// to be reused for an actual order's real size — only printroveDesignId
+// (the upload, on Design) is safe to reuse there.
+model DesignProduct {
+  id       String @id @default(cuid())
+  designId String
+  design   Design @relation(fields: [designId], references: [id], onDelete: Cascade)
+  category String
+  color    String // "Black" only for now — see settings.printrove.products
+
+  previewSize        String
+  printroveProductId Int?
+  printroveVariantId Int?
+  mockupFrontUrl     String?
+  mockupBackUrl      String?
+  // pending | ready | failed — Printrove product-creation/mockup lifecycle.
+  status       String  @default("pending")
+  errorMessage String? @db.Text
+
+  // unreviewed | approved | rejected
+  approvalStatus String    @default("unreviewed")
+  reviewedAt     DateTime?
+  reviewNote     String?   @db.Text
+
+  orders Order[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([designId, category, color])
+  @@index([designId])
 }
 
 // One purchase of a Design. Split out from Design so two buyers of the same
@@ -86,6 +140,22 @@ model Order {
   design   Design @relation(fields: [designId], references: [id])
   userId   String?
   user     User?  @relation(fields: [userId], references: [id])
+
+  // Which reviewable (design, category, color) combo this order belongs to —
+  // set at creation, used to check approvalStatus for the select-time
+  // auto-fulfill path and to cascade admin approve/reject to pending orders.
+  // Null for pre-migration orders, which fall back to today's exact
+  // approve-on-click behavior in /api/admin/approve.
+  designProductId String?
+  designProduct   DesignProduct? @relation(fields: [designProductId], references: [id])
+
+  // Soft, non-authoritative reference to which saved address was used to
+  // prefill this order — the recipient*/address* snapshot fields below
+  // remain the source of truth for what actually ships, since a saved
+  // Address can be edited/deleted later and an order must not silently
+  // change with it.
+  addressId String?
+  address   Address? @relation(fields: [addressId], references: [id])
 
   // ── Product & variant ───────────────────────────────────────────────────
   // "men" for now (single hardcoded product) — Phase 2 wires this to a real
@@ -148,8 +218,9 @@ model Order {
   @@index([razorpayOrderId])
 }
 
-// A signed-in buyer, identified by Firebase UID. Populated once magic-link
-// auth lands (Phase 6) — until then every Order.userId stays null.
+// A signed-in buyer, identified by Firebase UID. authProvider/emailVerified
+// come straight off the decoded Firebase ID token at session-mint time
+// (google.com | email_link) — see /api/auth/session and src/lib/auth.ts.
 model User {
   id             String   @id // Firebase UID
   email          String   @unique
@@ -159,7 +230,39 @@ model User {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
+  orders    Order[]
+  addresses Address[]
+}
+
+// A saved shipping address on a signed-in customer's account. Orders never
+// reference these live — checkout copies the chosen Address's fields into
+// the new Order's own recipient*/address* snapshot columns, so editing or
+// deleting a saved Address can never change what an already-placed order
+// ships to (Order.addressId is a soft pointer back to this, for display
+// only — see the Order model).
+model Address {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  label     String? // e.g. "Home", "Work" — optional nickname
+  name      String
+  phone     String
+  address1  String
+  address2  String?
+  address3  String?
+  city      String?
+  state     String?
+  pincode   String?
+  country   String
+  isDefault Boolean @default(false)
+
   orders Order[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
 }
 
 // Atomically-incrementing named counters (e.g. GST invoice numbers, which

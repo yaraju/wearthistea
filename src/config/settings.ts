@@ -156,6 +156,11 @@ export const settings = {
         variantMap: { "Black|S": 269, "Black|M": 270, "Black|L": 271, "Black|XL": 272 } as Record<string, number>,
         print: { width: 3000, height: 3000, top: 1440, left: 840 },
         retailPrice: num(process.env.PRINTROVE_RETAIL_PRICE_MEN, 599),
+        // Size used to build the one preview mockup for this category — a
+        // representative middle size, not a real order. Mockups are proven
+        // pixel-identical across sizes within a category (print placement
+        // doesn't vary by size), so any size in variantMap would do.
+        previewSize: "M",
         enabled: true,
       },
       {
@@ -169,6 +174,7 @@ export const settings = {
         variantMap: { "Black|XS": 335, "Black|S": 333, "Black|M": 332, "Black|L": 331, "Black|XL": 334 } as Record<string, number>,
         print: { width: 3000, height: 3000, top: 675, left: 240 },
         retailPrice: num(process.env.PRINTROVE_RETAIL_PRICE_WOMEN, 599),
+        previewSize: "M",
         enabled: true,
       },
       {
@@ -182,6 +188,7 @@ export const settings = {
         variantMap: { "Black|1": 636, "Black|2": 644, "Black|3": 652, "Black|4": 660 } as Record<string, number>,
         print: { width: 1800, height: 1800, top: 270, left: 150 },
         retailPrice: num(process.env.PRINTROVE_RETAIL_PRICE_TODDLER, 599),
+        previewSize: "2",
         enabled: true,
       },
       {
@@ -195,6 +202,7 @@ export const settings = {
         variantMap: { "Black|8": 676, "Black|10": 684, "Black|12": 692, "Black|14": 700 } as Record<string, number>,
         print: { width: 3000, height: 3000, top: 675, left: 240 },
         retailPrice: num(process.env.PRINTROVE_RETAIL_PRICE_KIDS, 599),
+        previewSize: "10",
         enabled: true,
       },
     ],
