@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from "react";
 import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebase-client";
+import { friendlyError } from "@/lib/error-messages";
 
 // Key the verify page reads back on this device to complete
 // signInWithEmailLink without re-prompting for the address — Firebase's own
@@ -125,7 +126,7 @@ export default function CustomerSignIn({ onSignedIn }: { onSignedIn: () => void 
         </button>
       </form>
 
-      {error && <p className="font-mono text-xs text-pink-ink">{error}</p>}
+      {error && <p className="font-mono text-xs text-pink-ink">{friendlyError(error)}</p>}
     </div>
   );
 }

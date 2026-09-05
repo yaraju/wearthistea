@@ -9,6 +9,8 @@ import { settings } from "@/config/settings";
 import { checkGenerateRateLimit, recordGenerateUsage, setRateLimitCookie } from "@/lib/rate-limit";
 import { enqueuePrintroveProducts } from "@/lib/tasks";
 import { logger } from "@/lib/logger";
+import { langfuse, getTraceId } from "@/lib/langfuse";
+import { friendlyError } from "@/lib/error-messages";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -41,6 +43,13 @@ export async function POST(req: Request) {
 
   const { designId } = body;
 
+  const traceId = getTraceId(req);
+  const trace = langfuse.trace({
+    name: "generate-retry-api",
+    id: traceId,
+    input: body,
+  });
+
   try {
     const design = await prisma.design.findUnique({
       where: { id: designId },
@@ -66,7 +75,7 @@ export async function POST(req: Request) {
     };
     let designB64: string;
     try {
-      designB64 = await renderConceptArt(concept);
+      designB64 = await renderConceptArt(concept, trace);
       await recordGenerateUsage(rateLimit);
     } catch (err) {
       // Gemini's own 429/503 (its quota/capacity, not ours) isn't the
@@ -127,22 +136,37 @@ export async function POST(req: Request) {
       });
     }
 
+    trace.update({ output: { designId, status: updated.status } });
     const res = NextResponse.json({ design: updated });
     setRateLimitCookie(res, rateLimit);
     return res;
   } catch (err) {
     const transient = isTransientProviderError(err);
+    const rawMessage = err instanceof Error ? err.message : "Retry failed.";
     const message = transient
       ? "Our design engine is swamped right now — try again in a moment."
-      : err instanceof Error
-        ? err.message
-        : "Retry failed.";
+      : friendlyError(rawMessage);
+    trace.update({
+      tags: ["error"],
+      output: { error: rawMessage },
+    });
+    logger.error(`[generate/retry] Render failed for design ${designId}: ${rawMessage}`, {
+      traceId,
+      designId,
+      error: err,
+    });
     // Best-effort: this route is now also the initial-render path (not just
     // manual retries), so a design left at "generating" forever after a
     // failure would look stuck rather than failed on a page reload.
     await prisma.design
-      .update({ where: { id: designId }, data: { status: "failed", errorMessage: message } })
-      .catch(() => {});
+      .update({ where: { id: designId }, data: { status: "failed", errorMessage: rawMessage } })
+      .catch((updateErr) => {
+        logger.error(`[generate/retry] Failed to persist failure status for design ${designId}`, {
+          traceId,
+          designId,
+          error: updateErr,
+        });
+      });
     const res = NextResponse.json({ error: message }, { status: transient ? 503 : 500 });
     setRateLimitCookie(res, rateLimit);
     return res;

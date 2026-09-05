@@ -7,6 +7,7 @@ import { computeGst } from "@/lib/gst";
 import { ensureDesignProduct } from "@/lib/design-products";
 import { pushOrderToProvider } from "@/lib/fulfillment";
 import { logger } from "@/lib/logger";
+import { friendlyError } from "@/lib/error-messages";
 
 export const runtime = "nodejs";
 
@@ -122,8 +123,12 @@ export async function POST(req: Request) {
       // its own, so the failure has to be read from its return value.
       const realized = await realizeDesign(body.designId);
       if (realized.status === "failed") {
+        logger.error("[Realize] Failed during selection", {
+          designId: body.designId,
+          error: realized.errorMessage,
+        });
         return NextResponse.json(
-          { error: realized.errorMessage || "Could not finalize the high-res design. Please try again." },
+          { error: realized.errorMessage ? friendlyError(realized.errorMessage) : "Could not finalize the high-res design. Please try again." },
           { status: 500 }
         );
       }

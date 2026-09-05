@@ -7,6 +7,7 @@ import { settings } from "@/config/settings";
 import { prompts } from "@/config/prompts";
 import { langfuse, getTraceId } from "@/lib/langfuse";
 import { logger } from "@/lib/logger";
+import { friendlyError } from "@/lib/error-messages";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -136,16 +137,15 @@ export async function POST(req: Request) {
     });
   } catch (err) {
     const transient = isTransientProviderError(err);
+    const rawMessage = err instanceof Error ? err.message : "Generation failed.";
     const message = transient
       ? "Our design engine is swamped right now — try again in a moment."
-      : err instanceof Error
-        ? err.message
-        : "Generation failed.";
+      : friendlyError(rawMessage);
     trace.update({
       tags: ["error"],
-      output: { error: message },
+      output: { error: rawMessage },
     });
-    logger.error(`[Stage 1] Generation failed: ${message}`, {
+    logger.error(`[Stage 1] Generation failed: ${rawMessage}`, {
       traceId,
       error: err,
     });

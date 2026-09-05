@@ -5,6 +5,7 @@ import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { Sparkles, Loader2, Check, AlertTriangle, ArrowRight, RotateCcw } from "lucide-react";
 import type { DesignDTO, GenerateResponse } from "@/lib/types";
 import { getColorCode } from "@/lib/colors";
+import { friendlyError } from "@/lib/error-messages";
 import PickDesignModal from "@/components/PickDesignModal";
 
 const SKELETON_COUNT = 5; // matches default settings.optionsPerKeyword
@@ -44,17 +45,6 @@ async function runWithConcurrency<T>(
     return run();
   }
   await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, run));
-}
-
-/** Translate raw API errors into a one-line human reason. */
-function friendlyError(msg: string): string {
-  if (/limit:\s*0|RESOURCE_EXHAUSTED|free_tier|quota|\b429\b/i.test(msg)) {
-    return "Image quota is 0 on the free tier — enable billing on your Gemini API project, or switch the image provider.";
-  }
-  if (/no image data|returned no image/i.test(msg)) {
-    return "Model returned no image — try a different GEMINI_IMAGE_MODEL.";
-  }
-  return msg.length > 160 ? msg.slice(0, 157) + "…" : msg;
 }
 
 export default function KeywordStudio() {
@@ -315,7 +305,7 @@ export default function KeywordStudio() {
               />
               <div>
                 <p className="font-semibold">The kettle broke.</p>
-                <p className="mt-1 text-sm text-ink-soft">{error}</p>
+                <p className="mt-1 text-sm text-ink-soft">{error && friendlyError(error)}</p>
               </div>
             </motion.div>
           )}

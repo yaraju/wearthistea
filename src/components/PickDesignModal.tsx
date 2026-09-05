@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, ArrowRight, X } from "lucide-react";
 import type { DesignDTO, AddressDTO, CatalogCategoryOption } from "@/lib/types";
+import { friendlyError } from "@/lib/error-messages";
 import CustomerSignIn from "@/components/CustomerSignIn";
 import AddAddressForm from "@/components/AddAddressForm";
 import DesignProductPreview from "@/components/DesignProductPreview";
@@ -420,7 +421,7 @@ export default function PickDesignModal({
               Cancel
             </button>
           </div>
-          {err && <p className="font-mono text-xs text-pink-ink">{err}</p>}
+          {err && <p className="font-mono text-xs text-pink-ink">{friendlyError(err)}</p>}
         </div>
       </div>
     </div>

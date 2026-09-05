@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent, type ChangeEvent } from "react";
 import type { AddressDTO } from "@/lib/types";
+import { friendlyError } from "@/lib/error-messages";
 
 const FIELD_CLS =
   "w-full rounded-lg border border-line bg-paper px-3 py-2 font-mono text-xs text-ink placeholder:text-ink-soft/60 focus:border-ink focus:outline-none";
@@ -98,7 +99,7 @@ export default function AddAddressForm({
           Cancel
         </button>
       </div>
-      {error && <p className="font-mono text-xs text-pink-ink">{error}</p>}
+      {error && <p className="font-mono text-xs text-pink-ink">{friendlyError(error)}</p>}
     </form>
   );
 }
