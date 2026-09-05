@@ -59,6 +59,12 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@img ./node_modules/@img
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@imgly ./node_modules/@imgly
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/onnxruntime-node ./node_modules/onnxruntime-node
+# @google-cloud/tasks loads its gRPC service definitions from protos.json at
+# runtime via a plain require() the tracer can't see statically — without
+# this, CloudTasksClient throws "Cannot find module .../protos.json" the
+# instant anything imports it, crashing the whole route (not just the Cloud
+# Tasks call) before our own error handling ever runs.
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@google-cloud/tasks ./node_modules/@google-cloud/tasks
 
 USER nextjs
 
