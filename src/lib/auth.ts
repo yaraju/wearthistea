@@ -1,6 +1,7 @@
 import { getApps, initializeApp } from "firebase-admin/app";
 import { getAuth, type DecodedIdToken } from "firebase-admin/auth";
 import { NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
 
 // The accounts allowed into /admin and /api/admin/* — comma-separated.
 // Firebase Auth is also configured for email/password and email link, but
@@ -110,6 +111,32 @@ export async function requireAdmin(req: Request): Promise<NextResponse | null> {
 }
 
 /**
+ * Upsert the `User` row for a decoded session token. Called at session-mint
+ * time (`/api/auth/session`) and defensively re-run here on every customer
+ * request, because a session cookie outlives a single deploy: a cookie
+ * minted before this upsert existed (or before a given field was added)
+ * stays valid under Firebase's own check but would otherwise point at a
+ * `User` row that was never created, breaking any write that references
+ * `userId` (e.g. saving an address) with a foreign-key violation.
+ */
+export async function ensureUserRecord(decoded: DecodedIdToken): Promise<void> {
+  if (!decoded.email) return;
+  await prisma.user.upsert({
+    where: { id: decoded.uid },
+    create: {
+      id: decoded.uid,
+      email: decoded.email,
+      emailVerified: decoded.email_verified ?? false,
+      authProvider: decoded.firebase?.sign_in_provider ?? "email_link",
+    },
+    update: {
+      email: decoded.email,
+      emailVerified: decoded.email_verified ?? false,
+    },
+  });
+}
+
+/**
  * Decode the session cookie for a signed-in customer — any valid session,
  * Google or email-link, no ADMIN_EMAILS/provider restriction. An admin is
  * also a valid customer session on the same cookie; nothing conflicts.
@@ -126,6 +153,7 @@ export async function requireCustomer(req: Request): Promise<NextResponse | null
   if (!session) {
     return NextResponse.json({ error: "Sign in to do this." }, { status: 401 });
   }
+  await ensureUserRecord(session);
   return null;
 }
 

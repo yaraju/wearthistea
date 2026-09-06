@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { createSessionCookie, verifyIdToken, SESSION_COOKIE, SESSION_MAX_AGE_MS } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { createSessionCookie, verifyIdToken, ensureUserRecord, SESSION_COOKIE, SESSION_MAX_AGE_MS } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
@@ -29,22 +28,7 @@ export async function POST(req: Request) {
   try {
     const decoded = await verifyIdToken(idToken);
     const sessionCookie = await createSessionCookie(idToken);
-
-    if (decoded.email) {
-      await prisma.user.upsert({
-        where: { id: decoded.uid },
-        create: {
-          id: decoded.uid,
-          email: decoded.email,
-          emailVerified: decoded.email_verified ?? false,
-          authProvider: decoded.firebase?.sign_in_provider ?? "email_link",
-        },
-        update: {
-          email: decoded.email,
-          emailVerified: decoded.email_verified ?? false,
-        },
-      });
-    }
+    await ensureUserRecord(decoded);
 
     const res = NextResponse.json({ ok: true });
     res.cookies.set(SESSION_COOKIE, sessionCookie, {
