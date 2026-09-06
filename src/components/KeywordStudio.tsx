@@ -91,6 +91,7 @@ export default function KeywordStudio() {
     setPhase("loading");
     setError(null);
     setResult(null);
+    track("brew_started", { keyword: tea });
 
     try {
       const res = await fetch("/api/generate", {
@@ -126,7 +127,9 @@ export default function KeywordStudio() {
         retryDesign
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Generation failed.");
+      const message = err instanceof Error ? err.message : "Generation failed.";
+      track("brew_failed", { keyword: tea, reason: message });
+      setError(message);
       setPhase("error");
     }
   }
