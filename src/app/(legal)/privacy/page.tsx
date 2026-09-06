@@ -77,15 +77,24 @@ export default function PrivacyPage() {
             Cloud and Firebase, and uses a Neon (PostgreSQL) database to store
             batches, designs, and prompts.
           </li>
+          <li>
+            <strong>Google Analytics.</strong> We use Google Analytics to
+            understand how visitors use the Service — pages viewed, time
+            spent, and general location/device information. See{" "}
+            <A href="https://policies.google.com/privacy">
+              Google&rsquo;s Privacy Policy
+            </A>
+            .
+          </li>
         </List>
       </Section>
 
       <Section title="4. Cookies">
         <p>
-          We use only strictly necessary cookies (for example, to keep you
-          signed in when access protection is enabled). We do not use
-          advertising or cross-site tracking cookies. For details, see our{" "}
-          <A href="/cookies">Cookie Policy</A>.
+          We use strictly necessary cookies (for example, to keep you signed
+          in when access protection is enabled) and analytics cookies via
+          Google Analytics. We do not use advertising or cross-site tracking
+          cookies. For details, see our <A href="/cookies">Cookie Policy</A>.
         </p>
       </Section>
 

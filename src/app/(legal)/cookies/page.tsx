@@ -4,7 +4,7 @@ import { LegalDoc, Section, List, A, Mail, LEGAL } from "@/components/legal";
 export const metadata: Metadata = {
   title: "Cookie Policy — wearthistea",
   description:
-    "How wearthistea uses cookies and similar technologies — currently only the strictly necessary ones.",
+    "How wearthistea uses cookies and similar technologies, including Google Analytics.",
 };
 
 export default function CookiesPage() {
@@ -31,8 +31,9 @@ export default function CookiesPage() {
 
       <Section title="2. How we use cookies">
         <p>
-          We use only <strong>strictly necessary</strong> cookies and storage —
-          the kind required for the site to function:
+          We use <strong>strictly necessary</strong> cookies and storage — the
+          kind required for the site to function — plus analytics cookies to
+          understand how the site is used:
         </p>
         <List>
           <li>
@@ -44,15 +45,26 @@ export default function CookiesPage() {
             <strong>Basic functionality and security.</strong> Storage needed to
             load pages correctly and protect the Service.
           </li>
+          <li>
+            <strong>Analytics.</strong> We use Google Analytics to understand
+            how visitors use the site — which pages are viewed, roughly how
+            long people spend on them, and general location/device
+            information. Google may set cookies on your device for this
+            purpose. See{" "}
+            <A href="https://policies.google.com/privacy">
+              Google&rsquo;s Privacy Policy
+            </A>{" "}
+            for how Google handles this data.
+          </li>
         </List>
       </Section>
 
       <Section title="3. What we don&rsquo;t use">
         <p>
-          We do <strong>not</strong> currently use advertising, marketing, or
-          cross-site tracking cookies, and we don&rsquo;t use third-party
-          analytics on this site. If that changes, we will update this policy and,
-          where required, ask for your consent first.
+          We do <strong>not</strong> currently use advertising or marketing
+          cookies, and we don&rsquo;t use cross-site tracking. If that
+          changes, we will update this policy and, where required, ask for
+          your consent first.
         </p>
       </Section>
 

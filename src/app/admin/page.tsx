@@ -11,6 +11,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import type { OrderDTO } from "@/lib/types";
+import { track } from "@/lib/analytics";
 import AdminLogin from "@/components/AdminLogin";
 import AdminReviewModal from "@/components/AdminReviewModal";
 
@@ -168,7 +169,10 @@ function AdminQueue({ onSignOut }: { onSignOut: () => void }) {
                 return (
                   <button
                     key={d.id}
-                    onClick={() => setOpenReview(d)}
+                    onClick={() => {
+                      track("design_review_opened", { designId: d.id });
+                      setOpenReview(d);
+                    }}
                     className="sticker flex items-center gap-3 rounded-xl bg-paper-2 p-3 text-left transition-transform duration-200 hover:-translate-y-0.5"
                   >
                     {img && (

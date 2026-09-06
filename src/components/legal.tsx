@@ -8,7 +8,7 @@ export const LEGAL = {
   brand: "wearthistea",
   email: "wearthistea@gmail.com",
   governingLaw: "the United States",
-  updated: "June 14, 2026",
+  updated: "September 6, 2026",
   year: "2026",
 };
 

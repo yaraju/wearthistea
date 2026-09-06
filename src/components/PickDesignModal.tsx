@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Loader2, ArrowRight, X } from "lucide-react";
 import type { DesignDTO, AddressDTO, CatalogCategoryOption } from "@/lib/types";
 import { friendlyError } from "@/lib/error-messages";
+import { track } from "@/lib/analytics";
 import CustomerSignIn from "@/components/CustomerSignIn";
 import AddAddressForm from "@/components/AddAddressForm";
 import DesignProductPreview from "@/components/DesignProductPreview";
@@ -127,6 +128,7 @@ export default function PickDesignModal({
   // bearing here — a plain button click is enough.
   async function placeOrder() {
     setErr(null);
+    let failureReason: "cancelled" | "verification_failed" | "order_create_failed" | null = null;
 
     if (needsShipping && !me?.signedIn) {
       setErr("Sign in first — see above.");
@@ -169,8 +171,19 @@ export default function PickDesignModal({
       });
       const data = await parseJsonResponse(res);
       if (!res.ok) throw new Error(data.error ?? "Could not place this order.");
+      track("begin_checkout", {
+        designId: design.id,
+        category,
+        value: data.order.unitPriceCents * data.order.quantity,
+        currency: "INR",
+      });
 
       if (!wantsPrepaid) {
+        track("purchase", {
+          transaction_id: data.order.id,
+          currency: "INR",
+          value: data.order.unitPriceCents * data.order.quantity,
+        });
         onPlaced();
         return;
       }
@@ -183,8 +196,14 @@ export default function PickDesignModal({
         body: JSON.stringify({ orderId }),
       });
       const createData = await parseJsonResponse(createRes);
-      if (!createRes.ok) throw new Error(createData.error ?? "Could not start payment.");
-      if (!createData.keyId) throw new Error("Online payment isn't set up yet — try Cash on Delivery.");
+      if (!createRes.ok) {
+        failureReason = "order_create_failed";
+        throw new Error(createData.error ?? "Could not start payment.");
+      }
+      if (!createData.keyId) {
+        failureReason = "order_create_failed";
+        throw new Error("Online payment isn't set up yet — try Cash on Delivery.");
+      }
 
       await new Promise<void>((resolve, reject) => {
         const rzp = new window.Razorpay!({
@@ -212,21 +231,36 @@ export default function PickDesignModal({
               });
               const verifyData = await parseJsonResponse(verifyRes);
               if (!verifyRes.ok || !verifyData.ok) {
+                failureReason = "verification_failed";
                 reject(new Error("Payment could not be verified. Contact us with your payment id."));
                 return;
               }
+              track("purchase", {
+                transaction_id: orderId,
+                currency: "INR",
+                value: createData.amountPaise / 100,
+              });
               resolve();
             } catch {
+              failureReason = "verification_failed";
               reject(new Error("Payment could not be verified. Contact us with your payment id."));
             }
           },
-          modal: { ondismiss: () => reject(new Error("Payment cancelled.")) },
+          modal: {
+            ondismiss: () => {
+              failureReason = "cancelled";
+              reject(new Error("Payment cancelled."));
+            },
+          },
         });
         rzp.open();
       });
 
       onPlaced();
     } catch (e2) {
+      if (wantsPrepaid) {
+        track("payment_failed", { designId: design.id, reason: failureReason ?? "unknown" });
+      }
       setErr(e2 instanceof Error ? e2.message : "Failed.");
     } finally {
       setBusy(false);

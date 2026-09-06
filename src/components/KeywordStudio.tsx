@@ -6,6 +6,7 @@ import { Sparkles, Loader2, Check, AlertTriangle, ArrowRight, RotateCcw } from "
 import type { DesignDTO, GenerateResponse } from "@/lib/types";
 import { getColorCode } from "@/lib/colors";
 import { friendlyError } from "@/lib/error-messages";
+import { track } from "@/lib/analytics";
 import PickDesignModal from "@/components/PickDesignModal";
 
 const SKELETON_COUNT = 5; // matches default settings.optionsPerKeyword
@@ -109,6 +110,7 @@ export default function KeywordStudio() {
       if (!res.ok) throw new Error(data.error ?? "Something went wrong.");
       setResult(data as GenerateResponse);
       setPhase("done");
+      track("generate_designs", { keyword: tea });
       // Concepts come back fast; each design's artwork is rendered by its own
       // request so no single request has to finish the whole batch inside
       // the hosting proxy's timeout. Each card flips from "generating" to
@@ -489,7 +491,10 @@ function DesignCard({
           </p>
         ) : (
           <button
-            onClick={() => setOpen(true)}
+            onClick={() => {
+              track("select_design", { designId: design.id });
+              setOpen(true);
+            }}
             className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-ink bg-highlight px-4 py-2.5 font-mono text-xs font-bold uppercase tracking-wider text-ink transition-transform duration-200 hover:-translate-y-0.5"
           >
             Pick this one <ArrowRight className="h-4 w-4" aria-hidden />

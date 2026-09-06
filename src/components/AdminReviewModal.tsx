@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Loader2, Check, X } from "lucide-react";
+import { track } from "@/lib/analytics";
 import DesignProductPreview from "@/components/DesignProductPreview";
 
 interface ReviewItem {
@@ -54,6 +55,10 @@ export default function AdminReviewModal({
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Could not save this decision.");
+      track(decision === "approved" ? "design_approved" : "design_rejected", {
+        designId: design.id,
+        designProductId,
+      });
       setDecided((d) => ({ ...d, [designProductId]: decision }));
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Failed.");
@@ -69,6 +74,7 @@ export default function AdminReviewModal({
       const res = await fetch(`/api/admin/designs/${design.id}/approve-all`, { method: "POST" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Could not approve all.");
+      track("design_approved_all", { designId: design.id });
       setDecided((d) => {
         const next = { ...d };
         for (const it of items) next[it.id] = "approved";

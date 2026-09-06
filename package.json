@@ -21,6 +21,7 @@
     "@google-cloud/tasks": "^7.0.0",
     "@google/genai": "^2.8.0",
     "@imgly/background-removal-node": "^1.4.5",
+    "@next/third-parties": "16.2.9",
     "@opentelemetry/auto-instrumentations-node": "^0.79.0",
     "@opentelemetry/resources": "^2.10.0",
     "@opentelemetry/sdk-node": "^0.221.0",
