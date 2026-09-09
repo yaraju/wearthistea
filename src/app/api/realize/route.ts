@@ -4,7 +4,7 @@ import { realizeDesign } from "@/lib/realize";
 import { langfuse, getTraceId } from "@/lib/langfuse";
 import { logger } from "@/lib/logger";
 import { friendlyError } from "@/lib/error-messages";
-import { checkGenerateRateLimit, recordGenerateUsage, setRateLimitCookie } from "@/lib/rate-limit";
+import { checkGenerateRateLimit, recordGenerateUsage } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -19,21 +19,17 @@ export async function POST(req: Request) {
   // exposed to abuse as the text-only concept step.
   const rateLimit = await checkGenerateRateLimit(req);
   if (!rateLimit.ok) {
-    const res = NextResponse.json(
+    return NextResponse.json(
       { error: "You've hit the free-generation limit for now — try again in a bit." },
       { status: 429 }
     );
-    setRateLimitCookie(res, rateLimit);
-    return res;
   }
 
   let body;
   try {
     body = Body.parse(await req.json());
   } catch {
-    const res = NextResponse.json({ error: "Design ID is required." }, { status: 400 });
-    setRateLimitCookie(res, rateLimit);
-    return res;
+    return NextResponse.json({ error: "Design ID is required." }, { status: 400 });
   }
 
   const { designId } = body;
@@ -66,12 +62,10 @@ export async function POST(req: Request) {
         traceId,
         designId,
       });
-      const res = NextResponse.json(
+      return NextResponse.json(
         { error: "Our design engine is swamped right now — try again in a moment." },
         { status: 503 }
       );
-      setRateLimitCookie(res, rateLimit);
-      return res;
     }
 
     logger.info(`[Stage 2] Successfully realized design: ${designId}`, {
@@ -80,12 +74,10 @@ export async function POST(req: Request) {
       status: realized.status,
     });
 
-    const res = NextResponse.json({
+    return NextResponse.json({
       success: true,
       design: realized,
     });
-    setRateLimitCookie(res, rateLimit);
-    return res;
   } catch (err) {
     const rawMessage = err instanceof Error ? err.message : "Realization failed.";
     const message = friendlyError(rawMessage);
@@ -98,8 +90,6 @@ export async function POST(req: Request) {
       designId,
       error: err,
     });
-    const res = NextResponse.json({ error: message }, { status: 500 });
-    setRateLimitCookie(res, rateLimit);
-    return res;
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { renderDesignArtwork, isTransientProviderError } from "@/lib/design-render";
-import { checkGenerateRateLimit, setRateLimitCookie } from "@/lib/rate-limit";
+import { checkGenerateRateLimit } from "@/lib/rate-limit";
 import { enqueuePrintroveProducts } from "@/lib/tasks";
 import { logger } from "@/lib/logger";
 import { langfuse, getTraceId } from "@/lib/langfuse";
@@ -20,21 +20,17 @@ export async function POST(req: Request) {
   // triggers a full paid image render.
   const rateLimit = await checkGenerateRateLimit(req);
   if (!rateLimit.ok) {
-    const res = NextResponse.json(
+    return NextResponse.json(
       { error: "You've hit the free-generation limit for now — try again in a bit." },
       { status: 429 }
     );
-    setRateLimitCookie(res, rateLimit);
-    return res;
   }
 
   let body;
   try {
     body = Body.parse(await req.json());
   } catch {
-    const res = NextResponse.json({ error: "Missing designId." }, { status: 400 });
-    setRateLimitCookie(res, rateLimit);
-    return res;
+    return NextResponse.json({ error: "Missing designId." }, { status: 400 });
   }
 
   const { designId } = body;
@@ -75,9 +71,7 @@ export async function POST(req: Request) {
     }
 
     trace.update({ output: { designId, status: updated.status } });
-    const res = NextResponse.json({ design: updated });
-    setRateLimitCookie(res, rateLimit);
-    return res;
+    return NextResponse.json({ design: updated });
   } catch (err) {
     const transient = isTransientProviderError(err);
     const rawMessage = err instanceof Error ? err.message : "Retry failed.";
@@ -105,8 +99,6 @@ export async function POST(req: Request) {
           error: updateErr,
         });
       });
-    const res = NextResponse.json({ error: message }, { status: transient ? 503 : 500 });
-    setRateLimitCookie(res, rateLimit);
-    return res;
+    return NextResponse.json({ error: message }, { status: transient ? 503 : 500 });
   }
 }

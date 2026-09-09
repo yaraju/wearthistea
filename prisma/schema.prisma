@@ -330,3 +330,33 @@ model Cache {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+// Live-editable image-generation rate limits (replaces the old RATE_LIMIT_*
+// env vars) — one shared window, three tier ceilings. Singleton row, id
+// fixed to "singleton". Edited from /admin/rate-limits; read (with a short
+// in-memory cache) by src/lib/rate-limit.ts on every generate/retry/realize
+// call, so a missing row must fall back to hardcoded defaults there rather
+// than erroring.
+model RateLimitConfig {
+  id             String   @id @default("singleton")
+  windowMs       Int      @default(3600000)
+  maxAnonymous   Int      @default(10)
+  maxSignedIn    Int      @default(25)
+  maxAdmin       Int      @default(1000)
+  updatedAt      DateTime @updatedAt
+  updatedByEmail String?
+}
+
+// Per-email override of the signed-in tier ceiling — takes precedence over
+// RateLimitConfig.maxSignedIn for this exact email, using the same shared
+// RateLimitConfig.windowMs (not independently configurable). Never applies
+// to a request authenticated as admin — see checkGenerateRateLimit.
+model RateLimitOverride {
+  id             String   @id @default(cuid())
+  email          String   @unique
+  maxPerWindow   Int
+  note           String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  updatedByEmail String?
+}

@@ -7,6 +7,7 @@ import type { DesignDTO, GenerateResponse } from "@/lib/types";
 import { getColorCode } from "@/lib/colors";
 import { friendlyError } from "@/lib/error-messages";
 import { track } from "@/lib/analytics";
+import { getAnonId, ANON_ID_HEADER } from "@/lib/anon-id";
 import PickDesignModal from "@/components/PickDesignModal";
 
 const SKELETON_COUNT = 5; // matches default settings.optionsPerKeyword
@@ -96,7 +97,7 @@ export default function KeywordStudio() {
     try {
       const res = await fetch("/api/generate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", [ANON_ID_HEADER]: getAnonId() },
         body: JSON.stringify({
           keyword: tea,
           // No productId/category/productType — apparel type is a pick-time
@@ -148,7 +149,7 @@ export default function KeywordStudio() {
     try {
       const res = await fetch("/api/generate/retry", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", [ANON_ID_HEADER]: getAnonId() },
         body: JSON.stringify({ designId }),
       });
       const data = await parseJsonResponse(res);

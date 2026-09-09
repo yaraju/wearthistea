@@ -1,50 +1,58 @@
 /**
  * Exercises checkGenerateRateLimit's counting logic directly against the DB
- * (via the Cache model) without spending any Gemini budget — confirms a
- * session gets blocked once it crosses maxPerSession, and that a different
- * session/IP isn't affected.
+ * (via the Cache model) without spending any Gemini budget — confirms an
+ * anonymous caller gets blocked once it crosses the live maxAnonymous
+ * ceiling, and that a different anonymous id isn't affected. Reads whatever
+ * RateLimitConfig is already live rather than changing it — this script must
+ * never write RateLimitConfig/RateLimitOverride, since DATABASE_URL here is
+ * the same DB real traffic uses and any such write would affect it
+ * immediately (the ~15s cache TTL, not a redeploy, is the only thing
+ * standing between an admin/script edit and live traffic). Only touches
+ * Cache rows scoped to this run's own throwaway anonymous id.
  *
  *   npx tsx scripts/test-rate-limit.ts
  */
 import dotenv from "dotenv";
 dotenv.config();
 
-import { checkGenerateRateLimit, RATE_LIMIT_COOKIE } from "../src/lib/rate-limit";
-import { settings } from "../src/config/settings";
+import { checkGenerateRateLimit, recordGenerateUsage, getRateLimitSettings } from "../src/lib/rate-limit";
+import { ANON_ID_HEADER } from "../src/lib/anon-id";
 import { prisma } from "../src/lib/prisma";
 
-function fakeRequest(sessionId: string | null, ip: string): Request {
-  const headers: Record<string, string> = { "x-forwarded-for": ip };
-  if (sessionId) headers["cookie"] = `${RATE_LIMIT_COOKIE}=${sessionId}`;
-  return new Request("http://localhost/api/generate", { headers });
+function fakeAnonRequest(anonId: string): Request {
+  return new Request("http://localhost/api/generate/retry", {
+    headers: { [ANON_ID_HEADER]: anonId },
+  });
 }
 
 async function main() {
-  const testSid = `test-${Date.now()}`;
-  const { maxPerSession } = settings.rateLimit;
-  console.log(`maxPerSession=${maxPerSession}`);
+  const { config } = await getRateLimitSettings();
+  const { maxAnonymous } = config;
+  console.log(`maxAnonymous=${maxAnonymous} (live config, unmodified by this script)`);
+
+  const testId = `test-${Date.now()}`;
 
   let blockedAt = -1;
-  for (let i = 1; i <= maxPerSession + 3; i++) {
-    const result = await checkGenerateRateLimit(fakeRequest(testSid, "203.0.113.5"));
+  for (let i = 1; i <= maxAnonymous + 3; i++) {
+    const result = await checkGenerateRateLimit(fakeAnonRequest(testId));
     console.log(`request ${i}: ok=${result.ok}`);
+    // Mirrors real callers: check, then only spend budget on success.
+    if (result.ok) await recordGenerateUsage(result);
     if (!result.ok && blockedAt === -1) blockedAt = i;
   }
 
-  if (blockedAt !== maxPerSession + 1) {
-    throw new Error(
-      `Expected blocking to start at request ${maxPerSession + 1}, got ${blockedAt}`
-    );
+  if (blockedAt !== maxAnonymous + 1) {
+    throw new Error(`Expected blocking to start at request ${maxAnonymous + 1}, got ${blockedAt}`);
   }
-  console.log(`PASS: session blocked starting at request ${blockedAt}`);
+  console.log(`PASS: anonymous caller blocked starting at request ${blockedAt}`);
 
-  // A different session on a different IP should be unaffected.
-  const other = await checkGenerateRateLimit(fakeRequest(`test-other-${Date.now()}`, "198.51.100.9"));
-  if (!other.ok) throw new Error("FAIL: unrelated session was blocked too");
-  console.log("PASS: unrelated session/IP unaffected");
+  // A different anonymous id should be unaffected.
+  const other = await checkGenerateRateLimit(fakeAnonRequest(`test-other-${Date.now()}`));
+  if (!other.ok) throw new Error("FAIL: unrelated anonymous id was blocked too");
+  console.log("PASS: unrelated anonymous id unaffected");
 
   // Cleanup the test rows so repeated runs don't accumulate junk.
-  await prisma.cache.deleteMany({ where: { key: { contains: testSid } } });
+  await prisma.cache.deleteMany({ where: { key: { contains: testId } } });
 }
 
 main()

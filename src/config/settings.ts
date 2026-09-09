@@ -64,21 +64,6 @@ export const settings = {
     state: process.env.SELLER_STATE ?? "Karnataka",
   },
 
-  /**
-   * Free generation is unauthenticated (Phase 6 deliberately skips
-   * anonymous Firebase auth — see AGENTS.md/the plan) so this is the only
-   * thing standing between a stranger with the URL and the Gemini budget.
-   * Two independent axes, both checked before calling Gemini: a per-browser
-   * cookie (cheap to clear, so not load-bearing alone) and per-IP (catches
-   * cookie-clearing; may under-count a shared office/NAT IP, which is why
-   * both exist rather than relying on either alone).
-   */
-  rateLimit: {
-    windowMs: num(process.env.RATE_LIMIT_WINDOW_MS, 60 * 60 * 1000),
-    maxPerSession: num(process.env.RATE_LIMIT_MAX_PER_SESSION, 10),
-    maxPerIp: num(process.env.RATE_LIMIT_MAX_PER_IP, 25),
-  },
-
   images: {
     /**
      * The clean, print-ready design is ALWAYS the one paid AI image per option

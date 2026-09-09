@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireCustomer, getCustomerSession } from "@/lib/auth";
 import { renderDesignArtwork, isTransientProviderError } from "@/lib/design-render";
-import { checkGenerateRateLimit, setRateLimitCookie } from "@/lib/rate-limit";
+import { checkGenerateRateLimit } from "@/lib/rate-limit";
 import { enqueuePrintroveProducts } from "@/lib/tasks";
 import { ensureDesignProduct } from "@/lib/design-products";
 import { settings } from "@/config/settings";
@@ -65,12 +65,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   // billed Gemini render.
   const rateLimit = await checkGenerateRateLimit(req);
   if (!rateLimit.ok) {
-    const res = NextResponse.json(
+    return NextResponse.json(
       { error: "You've hit the free-generation limit for now — try again in a bit." },
       { status: 429 }
     );
-    setRateLimitCookie(res, rateLimit);
-    return res;
   }
 
   const traceId = getTraceId(req);
@@ -132,9 +130,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       orderId: order.id,
       error: err,
     });
-    const res = NextResponse.json({ error: message }, { status: transient ? 503 : 500 });
-    setRateLimitCookie(res, rateLimit);
-    return res;
+    return NextResponse.json({ error: message }, { status: transient ? 503 : 500 });
   }
 
   // Best-effort — same as /api/generate/retry. Never fails the response;
@@ -201,7 +197,5 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   });
 
   trace.update({ output: { newDesignId: renderedDesign.id, newOrderId: newOrder.id } });
-  const res = NextResponse.json({ ok: true, order: newOrder });
-  setRateLimitCookie(res, rateLimit);
-  return res;
+  return NextResponse.json({ ok: true, order: newOrder });
 }
