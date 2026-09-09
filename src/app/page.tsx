@@ -11,6 +11,8 @@ import {
 } from "lucide-react";
 import KeywordStudio from "@/components/KeywordStudio";
 import { LEGAL, LEGAL_LINKS } from "@/components/legal";
+import AccountMenu from "@/components/AccountMenu";
+import AdminFooterLink from "@/components/AdminFooterLink";
 
 const TICKER = [
   "SPILL THE TEA",
@@ -55,12 +57,7 @@ export default function Home() {
           <a href="#why" className="hidden text-ink-soft hover:text-ink sm:block">
             Why it slaps
           </a>
-          <Link
-            href="/admin"
-            className="rounded-full border-2 border-ink px-3 py-1.5 transition-colors duration-200 hover:bg-ink hover:text-paper"
-          >
-            Admin
-          </Link>
+          <AccountMenu />
         </nav>
       </header>
 
@@ -290,12 +287,7 @@ export default function Home() {
             <p className="font-mono text-[11px] uppercase tracking-wider text-ink-soft">
               gossip you can wear · brewed with AI · printed on demand
             </p>
-            <Link
-              href="/admin"
-              className="font-mono text-[11px] uppercase tracking-wider text-ink-soft hover:text-ink"
-            >
-              Admin queue →
-            </Link>
+            <AdminFooterLink />
           </div>
           <nav className="mt-6 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 border-t border-line pt-6 font-mono text-[11px] uppercase tracking-wider text-ink-soft">
             <span>© {LEGAL.year} {LEGAL.brand}</span>

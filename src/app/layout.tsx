@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Libre_Bodoni, Public_Sans, Space_Mono } from "next/font/google";
 import { GoogleAnalytics } from "@next/third-parties/google";
+import { AccountProvider } from "@/lib/account-context";
 import "./globals.css";
 
 const display = Libre_Bodoni({
@@ -42,7 +43,7 @@ export default function RootLayout({
       className={`${display.variable} ${sans.variable} ${mono.variable} h-full antialiased`}
     >
       <body className="min-h-full bg-paper text-ink font-sans selection:bg-pink selection:text-paper">
-        {children}
+        <AccountProvider>{children}</AccountProvider>
       </body>
       {process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID && (
         <GoogleAnalytics gaId={process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID} />

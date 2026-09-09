@@ -3,62 +3,18 @@
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, Plus, Star } from "lucide-react";
 import type { AddressDTO } from "@/lib/types";
-import CustomerSignIn from "@/components/CustomerSignIn";
 import AddAddressForm from "@/components/AddAddressForm";
+import { useAccount } from "@/lib/account-context";
 
 const PROVIDER_LABEL: Record<string, string> = {
   "google.com": "Google",
   email_link: "Email link",
 };
 
+// The sign-in gate lives in account/layout.tsx now — this only ever renders
+// once AccountLayout has already confirmed the visitor is signed in.
 export default function AccountPage() {
-  const [authChecked, setAuthChecked] = useState(false);
-  const [me, setMe] = useState<{ email: string | null; authProvider: string | null } | null>(null);
-
-  const checkAuth = useCallback(async () => {
-    try {
-      const res = await fetch("/api/account/me", { cache: "no-store" });
-      const data = await res.json().catch(() => ({}));
-      setMe(data.signedIn ? { email: data.email, authProvider: data.authProvider } : null);
-    } catch {
-      setMe(null);
-    } finally {
-      setAuthChecked(true);
-    }
-  }, []);
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    checkAuth();
-  }, [checkAuth]);
-
-  if (!authChecked) {
-    return (
-      <div className="grid min-h-screen place-items-center font-mono text-sm text-ink-soft">
-        <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
-      </div>
-    );
-  }
-
-  if (!me) {
-    return (
-      <div className="mx-auto mt-24 max-w-sm p-6">
-        <h1 className="mb-4 font-display text-xl font-bold">Sign in</h1>
-        <CustomerSignIn onSignedIn={checkAuth} />
-      </div>
-    );
-  }
-
-  return <AccountDashboard email={me.email} authProvider={me.authProvider} />;
-}
-
-function AccountDashboard({
-  email,
-  authProvider,
-}: {
-  email: string | null;
-  authProvider: string | null;
-}) {
+  const { email, authProvider } = useAccount();
   const [addresses, setAddresses] = useState<AddressDTO[] | null>(null);
   const [adding, setAdding] = useState(false);
 

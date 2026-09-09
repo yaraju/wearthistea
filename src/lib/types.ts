@@ -80,6 +80,23 @@ export interface OrderDTO {
 
   createdAt: string;
   updatedAt: string;
+
+  // ── Customer-facing fields, populated only by GET /api/account/orders —
+  // undefined on the admin queue's usage of this same type. ──────────────
+  /** One of: in_review | printing | dispatched | out_for_delivery |
+   *  delivered | rejected | failed | cancelled — see order-status.ts. */
+  simplifiedStatus?: string;
+  /** Clickable tracking link, only when Printrove's live response included
+   *  one — a bare tracking number with no URL is shown as plain text
+   *  instead of guessing a courier. */
+  trackingUrl?: string | null;
+  courierName?: string | null;
+  deliveredAt?: string | null;
+  /** True for a rejected order that hasn't already been regenerated once. */
+  canRegenerate?: boolean;
+  /** Set once this rejected order has been regenerated — the id of the new
+   *  order it spawned. */
+  regeneratedIntoOrderId?: string | null;
 }
 
 // Checkout options the landing page uses to build the order form.

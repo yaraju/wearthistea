@@ -8,6 +8,7 @@ import { ensureDesignProduct } from "@/lib/design-products";
 import { pushOrderToProvider } from "@/lib/fulfillment";
 import { logger } from "@/lib/logger";
 import { friendlyError } from "@/lib/error-messages";
+import { getCustomerSession, ensureUserRecord } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
@@ -144,6 +145,16 @@ export async function POST(req: Request) {
   const c = body.customer;
   const prepaid = body.paymentMethod === "prepaid";
 
+  // Attribute this order to the signed-in customer, when there is one, so it
+  // shows up on /account/orders — getCustomerSession alone does NOT upsert
+  // the User row (only requireCustomer does), so that has to happen here
+  // too or the FK on Order.userId can point at a User that doesn't exist
+  // yet. Guest (no session) orders keep userId: null, same as today —
+  // PickDesignModal already blocks submission client-side unless signed in
+  // whenever shipping is collected, so this doesn't newly require login.
+  const session = await getCustomerSession(req);
+  if (session) await ensureUserRecord(session);
+
   // Price the order now (not at approval time) — prepaid needs an amount to
   // charge before approval ever happens, and pricing it up front (instead of
   // whatever settings.printrove looks like whenever an admin eventually
@@ -171,6 +182,7 @@ export async function POST(req: Request) {
     data: {
       designId: body.designId,
       designProductId: designProduct?.id ?? null,
+      userId: session?.uid ?? null,
       status: prepaid ? "pending_payment" : "pending",
       productCategory: body.category,
       variantSize: body.size,

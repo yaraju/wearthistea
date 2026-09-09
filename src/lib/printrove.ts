@@ -255,6 +255,50 @@ async function createOrder(opts: {
   };
 }
 
+export interface PrintroveOrderStatus {
+  raw: string | null;
+  trackingNumber: string | null;
+  trackingUrl: string | null;
+  courierName: string | null;
+  /** Delivery timestamp, if Printrove's response includes one — prefer this
+   *  over the moment we happened to observe "delivered" (see
+   *  printrove-order-status.ts). */
+  deliveredAt: Date | null;
+}
+
+/**
+ * GET /orders/{id} — live order status, fetched on-demand when a customer
+ * opens /account/orders (no webhook — see printrove-order-status.ts). The
+ * exact response schema is UNCONFIRMED: Printrove's public docs
+ * (https://api.printrove.com/docs/) confirm this endpoint exists but don't
+ * document its response fields. The field names below are best-effort
+ * guesses pending a real run of scripts/test-order-status.ts against an
+ * actual placed order (none existed in this database as of writing this) —
+ * correct them here once real output is available; nothing else in the
+ * status pipeline should need to change (see printrove-status.ts).
+ */
+export async function getOrderStatus(printroveOrderId: string): Promise<PrintroveOrderStatus> {
+  const data = await api(`/orders/${printroveOrderId}`, { method: "GET" });
+  const order = (data.order ?? data.data ?? data) as Json;
+
+  const rawStatus = (order.status as string | undefined) ?? null; // field name GUESSED
+  const trackingUrl = (order.tracking_url as string | undefined) ?? null; // GUESSED — may not exist
+  const courierName =
+    (order.courier as string | undefined) ?? (order.courier_name as string | undefined) ?? null; // GUESSED
+  const deliveredRaw =
+    (order.delivered_at as string | undefined) ?? (order.delivery_date as string | undefined) ?? null; // GUESSED
+  const deliveredAt = deliveredRaw ? new Date(deliveredRaw) : null;
+
+  return {
+    raw: rawStatus,
+    trackingNumber:
+      (order.tracking_number as string | undefined) ?? (order.awb as string | undefined) ?? null,
+    trackingUrl,
+    courierName,
+    deliveredAt: deliveredAt && !Number.isNaN(deliveredAt.getTime()) ? deliveredAt : null,
+  };
+}
+
 // ── Catalog APIs (public — no auth required) ─────────────────────────────────
 const CATALOG_BASE = "https://api.printrove.com/api";
 

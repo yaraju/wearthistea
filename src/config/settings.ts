@@ -206,6 +206,14 @@ export const settings = {
         enabled: true,
       },
     ],
+    /**
+     * How long a fetched live order status (see printrove-order-status.ts)
+     * is trusted before /account/orders fetches Printrove again. There's no
+     * webhook — this is a customer-page-view-triggered read-through cache,
+     * not a push, so this TTL is the only thing standing between a busy
+     * customer refreshing their orders page and hammering Printrove's API.
+     */
+    orderStatusCacheTtlMs: num(process.env.ORDER_STATUS_CACHE_TTL_MS, 15 * 60 * 1000),
   },
 } as const;
 

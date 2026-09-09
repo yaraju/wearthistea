@@ -215,12 +215,57 @@ model Order {
   invoiceNumber String? @unique
   invoiceUrl    String?
 
+  // Durable, write-once — set the first time the live-status read-through
+  // cache (see OrderStatusCache/order-status.ts) resolves this order as
+  // delivered. Never overwritten after that. This, not the live cache, is
+  // what "delivered this week" bucketing on /account/orders reads, since
+  // Printrove's live response gives current state, not a delivery date.
+  deliveredAt DateTime?
+
+  // Set on the NEW order a customer's "regenerate" click spawns from a
+  // rejected order — points back at the rejected order it replaced. The
+  // rejected row itself is never mutated; this is the only link between
+  // them. @unique enforces at most one regeneration per rejected order at
+  // the DB level (Postgres treats multiple NULLs as distinct in a unique
+  // index, so ordinary orders are never constrained by this).
+  regeneratedFromOrderId String? @unique
+  regeneratedFrom        Order?  @relation("OrderRegeneration", fields: [regeneratedFromOrderId], references: [id])
+  regeneratedInto        Order[] @relation("OrderRegeneration")
+
+  statusCache OrderStatusCache?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([designId])
   @@index([status])
   @@index([razorpayOrderId])
+  @@index([userId])
+}
+
+// Read-through cache of Printrove's live order status, refreshed on-demand
+// when a customer opens /account/orders (see printrove-order-status.ts) —
+// there is no webhook. Deliberately kept off Order itself: writing these
+// fields directly onto Order would bump Order.updatedAt on every single
+// customer page view, and /api/admin/batches sorts the admin queue by
+// `orderBy: { updatedAt: "desc" }` — that churn would float a customer's
+// in-flight order to the top of the admin queue every time they refresh
+// their own order page.
+model OrderStatusCache {
+  orderId String @id
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  // Exactly as Printrove returned it — kept for debugging/remapping, since
+  // the real field name/values are unconfirmed until tested live (see
+  // scripts/test-order-status.ts).
+  statusRaw String? @db.Text
+  // One of: printing | dispatched | out_for_delivery | delivered — see
+  // mapPrintroveStatus in printrove-status.ts. Null until first fetched.
+  statusSimplified String?
+  trackingUrl       String?
+  courierName       String?
+
+  fetchedAt DateTime @default(now())
 }
 
 // A signed-in buyer, identified by Firebase UID. authProvider/emailVerified

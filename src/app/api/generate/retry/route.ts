@@ -1,12 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { renderConceptArt, isTransientProviderError } from "@/lib/gemini";
-import type { Concept } from "@/config/prompts";
-import { compositeOnTee } from "@/lib/mockup";
-import { saveImage, hasDurableStorage } from "@/lib/storage";
-import { settings } from "@/config/settings";
-import { checkGenerateRateLimit, recordGenerateUsage, setRateLimitCookie } from "@/lib/rate-limit";
+import { renderDesignArtwork, isTransientProviderError } from "@/lib/design-render";
+import { checkGenerateRateLimit, setRateLimitCookie } from "@/lib/rate-limit";
 import { enqueuePrintroveProducts } from "@/lib/tasks";
 import { logger } from "@/lib/logger";
 import { langfuse, getTraceId } from "@/lib/langfuse";
@@ -59,65 +55,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Design not found." }, { status: 404 });
     }
 
-    // Rebuild the concept from the stored fields (title/phrase/visual/style)
-    // and re-render through the same path generateBatch uses — not a bare
-    // replay of designPrompt, which for "svg"-style designs is only the
-    // illustration half; a retry needs to redo the Satori text compositing
-    // too, not just regenerate the art-only layer.
-    const concept: Concept = {
-      title: design.title,
-      phrase: design.phrase,
-      visualConcept: design.visualConcept,
-      vibe: design.vibe ?? undefined,
-      blurb: design.blurb ?? undefined,
-      color: design.variantColor || settings.printify.defaultColor,
-      artStyle: design.style === "svg" ? "svg" : "raster",
-    };
-    let designB64: string;
-    try {
-      designB64 = await renderConceptArt(concept, trace);
-      await recordGenerateUsage(rateLimit);
-    } catch (err) {
-      // Gemini's own 429/503 (its quota/capacity, not ours) isn't the
-      // caller's fault — don't spend their free-generation budget on it.
-      if (!isTransientProviderError(err)) await recordGenerateUsage(rateLimit);
-      throw err;
-    }
-
-    const base = `${design.id}-${Date.now()}`;
-    const designImagePath = await saveImage(design.batchId, `${base}-design.png`, designB64);
-
-    let productImagePath = design.productImagePath;
-    if (settings.images.generateProductShot) {
-      try {
-        const productB64 = await compositeOnTee(
-          designB64,
-          design.variantColor || settings.printify.defaultColor
-        );
-        productImagePath = await saveImage(
-          design.batchId,
-          `${base}-product.png`,
-          productB64
-        );
-      } catch {
-        // Mockup is optional, fallback to design file
-      }
-    }
-
-    const updated = await prisma.design.update({
-      where: { id: designId },
-      data: {
-        designImagePath,
-        productImagePath,
-        // Only needed as a lost-file fallback on ephemeral local disk — once
-        // GCS is configured, saveImage() above already either durably
-        // persisted this or threw, so storing a second copy here would just
-        // be permanent, ever-growing database bloat for no benefit.
-        designImageData: hasDurableStorage ? null : designB64,
-        status: "generated",
-        errorMessage: null,
-      },
-    });
+    const updated = await renderDesignArtwork(design, trace, rateLimit);
 
     // Brew Printrove preview products for every enabled category now, so
     // they're usually ready by the time a customer picks this design.
