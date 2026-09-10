@@ -1,6 +1,7 @@
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import path from "node:path";
 import { Storage } from "@google-cloud/storage";
+import { createPreviewImage } from "./image-preview";
 
 const GCS_BUCKET = process.env.GCS_BUCKET;
 const storage = GCS_BUCKET ? new Storage() : null;
@@ -65,6 +66,23 @@ export async function saveImage(
   }
 
   return `${URL_PREFIX}/${batchId}/${fileName}`;
+}
+
+/** Save a base64 PNG and a downscaled screen-quality preview alongside it —
+ * the preview is what customer-facing views render; the full-res path is
+ * reserved for provider upload / order placement. See image-preview.ts. */
+export async function saveImageWithPreview(
+  batchId: string,
+  fileName: string,
+  base64: string
+): Promise<{ path: string; previewPath: string }> {
+  const previewFileName = fileName.replace(/(\.[a-z]+)$/i, "-preview$1");
+  const [savedPath, previewBase64] = await Promise.all([
+    saveImage(batchId, fileName, base64),
+    createPreviewImage(base64),
+  ]);
+  const previewPath = await saveImage(batchId, previewFileName, previewBase64);
+  return { path: savedPath, previewPath };
 }
 
 /** Save an arbitrary file (e.g. a generated invoice PDF) under a given

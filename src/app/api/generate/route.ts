@@ -107,6 +107,8 @@ export async function POST(req: Request) {
             productPrompt: `[mockup composite of clean design on ${resolvedColor} tee]`,
             designImagePath: "",
             productImagePath: "",
+            designPreviewImagePath: "",
+            productPreviewImagePath: "",
             category: resolvedCategory,
             variantColor: resolvedColor,
             status: "generating",

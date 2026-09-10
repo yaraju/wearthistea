@@ -71,7 +71,12 @@ export async function POST(req: Request) {
     }
 
     trace.update({ output: { designId, status: updated.status } });
-    return NextResponse.json({ design: updated });
+    // Never send the full-res print file to a customer-facing caller —
+    // only the downscaled preview. designImagePath/productImagePath stay
+    // server-side (read by fulfillment.ts / design-products.ts).
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { designImagePath, productImagePath, designImageData, ...safeDesign } = updated;
+    return NextResponse.json({ design: safeDesign });
   } catch (err) {
     const transient = isTransientProviderError(err);
     const rawMessage = err instanceof Error ? err.message : "Retry failed.";

@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { printroveProduct } from "@/config/settings";
-import { uploadDesign, createProduct, getProduct } from "@/lib/printrove";
+import { uploadDesign, createProduct, getProduct, designPixelSize } from "@/lib/printrove";
 import { readImageAsBase64 } from "@/lib/storage";
 import { logger } from "@/lib/logger";
 import type { DesignProduct } from "@prisma/client";
@@ -82,22 +82,26 @@ async function createDesignProduct(
   }
 
   try {
+    // Always read the artwork bytes — needed both to (maybe) upload it and,
+    // regardless of reuse, to compute its real pixel size for placement
+    // (see printrove.ts's fitDesignToFrame).
+    const printPath = design.designImagePath || design.productImagePath;
+    let base64: string;
+    try {
+      base64 = await readImageAsBase64(printPath);
+    } catch {
+      if (!design.designImageData) {
+        throw new Error("Artwork file is missing and no database copy exists.");
+      }
+      base64 = design.designImageData;
+    }
+
     // Upload the artwork once and persist it on Design — every other
     // category/color combo for this design reuses the same asset.
     let printroveDesignId: number;
     if (design.printroveDesignId) {
       printroveDesignId = Number(design.printroveDesignId);
     } else {
-      const printPath = design.designImagePath || design.productImagePath;
-      let base64: string;
-      try {
-        base64 = await readImageAsBase64(printPath);
-      } catch {
-        if (!design.designImageData) {
-          throw new Error("Artwork file is missing and no database copy exists.");
-        }
-        base64 = design.designImageData;
-      }
       printroveDesignId = await uploadDesign(`${design.id}.png`, base64);
       await prisma.design.update({
         where: { id: design.id },
@@ -105,11 +109,13 @@ async function createDesignProduct(
       });
     }
 
+    const imageSize = await designPixelSize(base64);
     const created = await createProduct({
       name: `${design.title} — ${product.categoryLabel} preview`,
       designId: printroveDesignId,
       baseVariantId,
       product,
+      imageSize,
     });
 
     // Upsert, not create: a concurrent brew-task run and an on-demand

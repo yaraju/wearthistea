@@ -2,7 +2,7 @@ import { prisma } from "./prisma";
 import { renderConceptArt, isTransientProviderError } from "./gemini";
 import { settings } from "@/config/settings";
 import { prompts, type Concept } from "@/config/prompts";
-import { saveImage, hasDurableStorage } from "./storage";
+import { saveImageWithPreview, hasDurableStorage } from "./storage";
 import { svgToPng } from "./svg-utils";
 import { compositeOnTee } from "./mockup";
 import { langfuse } from "./langfuse";
@@ -74,17 +74,24 @@ export async function realizeDesign(designId: string, parent?: any) {
 
     const storageObservation = observation.span({ name: "saveImages" });
     // Save final high-res image (replaces the preview path)
-    const designImagePath = await saveImage(design.batchId, `${design.id}-final.png`, finalDesignB64);
-    
+    const { path: designImagePath, previewPath: designPreviewImagePath } = await saveImageWithPreview(
+      design.batchId,
+      `${design.id}-final.png`,
+      finalDesignB64
+    );
+
     // Update mockup with final high-res image
     let productImagePath = design.productImagePath;
+    let productPreviewImagePath = design.productPreviewImagePath;
     if (settings.images.generateProductShot) {
       try {
         const productB64 = await compositeOnTee(
           finalDesignB64,
           design.variantColor || settings.printify.defaultColor
         );
-        productImagePath = await saveImage(design.batchId, `${design.id}-product-final.png`, productB64);
+        const saved = await saveImageWithPreview(design.batchId, `${design.id}-product-final.png`, productB64);
+        productImagePath = saved.path;
+        productPreviewImagePath = saved.previewPath;
       } catch (err) {
         console.error("Mockup update failed during realization:", err);
       }
@@ -95,7 +102,9 @@ export async function realizeDesign(designId: string, parent?: any) {
       where: { id: designId },
       data: {
         designImagePath,
+        designPreviewImagePath,
         productImagePath,
+        productPreviewImagePath,
         // See the identical comment in /api/generate/retry — only needed as
         // a lost-file fallback when GCS isn't configured.
         designImageData: hasDurableStorage ? null : finalDesignB64,

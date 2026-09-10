@@ -54,6 +54,12 @@ model Design {
   // Stored artwork (paths under /public, served at the same URL)
   productImagePath String // styled product mockup shown in the grid
   designImagePath  String // clean, print-ready art sent to the provider
+  // Downscaled, screen-quality derivatives of the two paths above — every
+  // customer-facing view renders these instead, so the full-res print file
+  // never reaches the browser. Full-res stays server-side only, read for
+  // provider upload / order placement (fulfillment.ts, design-products.ts).
+  productPreviewImagePath String?
+  designPreviewImagePath  String?
   // Base64 copy of the print-ready design — used as fallback when the file is
   // missing (e.g. after a redeploy wipes the ephemeral filesystem on some hosts).
   designImageData  String? @db.Text

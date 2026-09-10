@@ -1,3 +1,4 @@
+import sharp from "sharp";
 import { settings, printroveProduct, type PrintroveProductConfig } from "@/config/settings";
 import type {
   FulfillInput,
@@ -120,13 +121,38 @@ export async function uploadDesign(fileName: string, base64: string): Promise<nu
 }
 
 
-function frontDesign(designId: number, print: PrintroveProductConfig["print"]) {
+// Fit a design's real pixel dimensions inside Printrove's print frame,
+// preserving its aspect ratio, and center it — generalizes the centering
+// recipe previously hand-applied once per category (see settings.ts) to run
+// for every design's actual generated size, since Gemini doesn't reliably
+// hit the requested canvas dimensions (see text-layer.ts).
+function fitDesignToFrame(
+  imgWidth: number,
+  imgHeight: number,
+  frame: { width: number; height: number }
+): { width: number; height: number; top: number; left: number } {
+  const scale = Math.min(frame.width / imgWidth, frame.height / imgHeight);
+  const width = Math.round(imgWidth * scale);
+  const height = Math.round(imgHeight * scale);
   return {
-    front: {
-      id: designId,
-      dimensions: { width: print.width, height: print.height, top: print.top, left: print.left },
-    },
+    width,
+    height,
+    left: Math.round((frame.width - width) / 2),
+    top: Math.round((frame.height - height) / 2),
   };
+}
+
+/** Real pixel dimensions of a base64-encoded design PNG, for placement. */
+export async function designPixelSize(base64: string): Promise<{ width: number; height: number }> {
+  const meta = await sharp(Buffer.from(base64, "base64")).metadata();
+  if (!meta.width || !meta.height) {
+    throw new Error("Could not read design image dimensions.");
+  }
+  return { width: meta.width, height: meta.height };
+}
+
+function frontDesign(designId: number, dimensions: { width: number; height: number; top: number; left: number }) {
+  return { front: { id: designId, dimensions } };
 }
 
 // ── Create product (adds the design-on-blank to your Product Library) ─────────
@@ -138,14 +164,16 @@ export async function createProduct(opts: {
   designId: number;
   baseVariantId: number;
   product: PrintroveProductConfig;
+  imageSize: { width: number; height: number };
 }): Promise<{ productId: number; variantId: number | null }> {
+  const dimensions = fitDesignToFrame(opts.imageSize.width, opts.imageSize.height, opts.product.frame);
   const data = await api("/products", {
     method: "POST",
     json: {
       name: opts.name.slice(0, 120),
       product_id: opts.product.subtypeId,
       is_plain: false,
-      design: frontDesign(opts.designId, opts.product.print),
+      design: frontDesign(opts.designId, dimensions),
       variants: [{ product_id: opts.baseVariantId }],
     },
   });
@@ -198,6 +226,7 @@ async function createOrder(opts: {
   cod: boolean;
   customer: NonNullable<FulfillInput["customer"]>;
   product: PrintroveProductConfig;
+  imageSize: { width: number; height: number };
 }): Promise<{ orderId: string | null; trackingNumber: string | null }> {
   const c = opts.customer;
   const phoneDigits = String(c.phone).replace(/\D/g, "");
@@ -208,7 +237,10 @@ async function createOrder(opts: {
       ? { variant_id: opts.variantId, quantity: opts.quantity }
       : {
           product_id: opts.productId,
-          design: frontDesign(opts.designId, opts.product.print),
+          design: frontDesign(
+            opts.designId,
+            fitDesignToFrame(opts.imageSize.width, opts.imageSize.height, opts.product.frame)
+          ),
           quantity: opts.quantity,
         };
 
@@ -557,11 +589,13 @@ export async function fulfill(input: FulfillInput): Promise<FulfillResult> {
   const designId = input.printroveDesignId
     ? Number(input.printroveDesignId)
     : await uploadDesign(input.designFileName, input.designBase64);
+  const imageSize = await designPixelSize(input.designBase64);
   const { productId, variantId } = await createProduct({
     name: input.title,
     designId,
     baseVariantId,
     product,
+    imageSize,
   });
 
   let orderId: string | null = null;
@@ -577,6 +611,7 @@ export async function fulfill(input: FulfillInput): Promise<FulfillResult> {
       cod: input.cod,
       customer: input.customer,
       product,
+      imageSize,
     });
     orderId = res.orderId;
     trackingNumber = res.trackingNumber;

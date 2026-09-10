@@ -38,6 +38,8 @@ export async function GET(req: Request) {
         vibe: design.vibe,
         productImagePath: design.productImagePath,
         designImagePath: design.designImagePath,
+        productPreviewImagePath: design.productPreviewImagePath,
+        designPreviewImagePath: design.designPreviewImagePath,
         hasImageData: Boolean(design.designImageData),
         printroveMockupUrl: designProduct?.mockupFrontUrl ?? null,
         batch: design.batch,

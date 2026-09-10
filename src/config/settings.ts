@@ -120,14 +120,13 @@ export const settings = {
      * shared Size/Color attribute id when adding a category.
      *
      * print geometry: Printrove's design-canvas coordinate space is 10x the
-     * product's front_print_width/height ("frame"). Men's/Women's/Kids all
-     * have a frame bigger than the 3000x3000 design box in both dimensions,
-     * so they use the documented centering recipe (left = (frameWidth -
-     * boxWidth)/2, top = (frameHeight - boxHeight)/2 — see
-     * scripts/test-printrove-centering.ts). Toddler's frame (2100x2340) is
-     * SMALLER than that box, so its box had to shrink too — verified by
-     * rendering live mockups at a couple of candidate sizes and eyeballing
-     * placement, not computed from the formula alone.
+     * product's front_print_width/height ("frame") — read live from
+     * Printrove's catalog API. Placement is no longer a fixed box: printrove.ts
+     * fits each design's ACTUAL generated aspect ratio inside this frame
+     * (scale-to-fit + center), since a hardcoded box assumes every design
+     * comes out at the same aspect ratio, which Gemini doesn't reliably
+     * produce (see text-layer.ts's note on this). See fitDesignToFrame() in
+     * printrove.ts.
      */
     products: [
       {
@@ -139,7 +138,7 @@ export const settings = {
         colorAttrId: 2,
         // Capped at S–XL — cost jumps 165 -> 180/200/220/230 at 2XL–5XL.
         variantMap: { "Black|S": 269, "Black|M": 270, "Black|L": 271, "Black|XL": 272 } as Record<string, number>,
-        print: { width: 3000, height: 3000, top: 1440, left: 840 },
+        frame: { width: 4680, height: 5880 },
         retailPrice: num(process.env.PRINTROVE_RETAIL_PRICE_MEN, 599),
         // Size used to build the one preview mockup for this category — a
         // representative middle size, not a real order. Mockups are proven
@@ -157,7 +156,7 @@ export const settings = {
         colorAttrId: 6,
         // Capped at XS–XL — cost jumps 155 -> 165/180/200/220 at 2XL–5XL.
         variantMap: { "Black|XS": 335, "Black|S": 333, "Black|M": 332, "Black|L": 331, "Black|XL": 334 } as Record<string, number>,
-        print: { width: 3000, height: 3000, top: 675, left: 240 },
+        frame: { width: 3480, height: 4350 },
         retailPrice: num(process.env.PRINTROVE_RETAIL_PRICE_WOMEN, 599),
         previewSize: "M",
         enabled: true,
@@ -171,7 +170,7 @@ export const settings = {
         colorAttrId: 11,
         // Sizes are ages, not S/M/L. Capped at 1–4 — cost jumps 130 -> 150 at age 6.
         variantMap: { "Black|1": 636, "Black|2": 644, "Black|3": 652, "Black|4": 660 } as Record<string, number>,
-        print: { width: 1800, height: 1800, top: 270, left: 150 },
+        frame: { width: 2100, height: 2340 },
         retailPrice: num(process.env.PRINTROVE_RETAIL_PRICE_TODDLER, 599),
         previewSize: "2",
         enabled: true,
@@ -185,7 +184,7 @@ export const settings = {
         colorAttrId: 13,
         // Sizes are ages, not S/M/L. Flat cost (150) across the offered range — no cap needed.
         variantMap: { "Black|8": 676, "Black|10": 684, "Black|12": 692, "Black|14": 700 } as Record<string, number>,
-        print: { width: 3000, height: 3000, top: 675, left: 240 },
+        frame: { width: 3480, height: 4350 },
         retailPrice: num(process.env.PRINTROVE_RETAIL_PRICE_KIDS, 599),
         previewSize: "10",
         enabled: true,

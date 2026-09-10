@@ -407,7 +407,9 @@ function DesignCard({
 
   // Show the clean, transparent print art (what actually gets printed) rather
   // than the tee mockup — it's far more visible and selectable in the grid.
-  const img = design.designImagePath || design.productImagePath;
+  // Screen-quality preview only — the full-res print file never reaches
+  // the browser.
+  const img = design.designPreviewImagePath || design.productPreviewImagePath;
 
   return (
     <motion.figure

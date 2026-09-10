@@ -70,7 +70,7 @@ export default function PickDesignModal({
   const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
   const [addingAddress, setAddingAddress] = useState(false);
 
-  const brewedImg = design.designImagePath || design.productImagePath;
+  const brewedImg = design.designPreviewImagePath || design.productPreviewImagePath;
   const selectedCategory = categories?.find((c) => c.category === category) ?? null;
 
   const loadAddresses = useCallback(async () => {

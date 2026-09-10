@@ -35,7 +35,7 @@ export default function OrderCard({
 
   const simplified = order.simplifiedStatus ?? order.status;
   const isRejected = order.status === "rejected";
-  const img = order.printroveMockupUrl || order.productImagePath || order.designImagePath;
+  const img = order.printroveMockupUrl || order.productPreviewImagePath || order.designPreviewImagePath;
   const showTracking = TRACKING_VISIBLE_STATUSES.has(simplified) && order.trackingNumber;
 
   async function regenerate() {

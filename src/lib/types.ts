@@ -25,8 +25,14 @@ export interface DesignDTO {
   vibe: string | null;
   blurb: string | null;
   variantColor: string | null; // garment color this art was rendered against
-  productImagePath: string;
-  designImagePath: string;
+  // Screen-quality previews — every customer-facing view renders these.
+  productPreviewImagePath: string;
+  designPreviewImagePath: string;
+  // Full-res print files are never sent to a customer-facing caller (see
+  // /api/generate/retry) — optional/absent there, present only for the
+  // brief window before rendering when the initial stub row is empty.
+  productImagePath?: string;
+  designImagePath?: string;
   status: string;
   errorMessage: string | null; // generation-failure detail
   // True when designImageData is stored in the DB — safe to retry without the file on disk.
@@ -43,8 +49,14 @@ export interface OrderDTO {
   title: string;
   phrase: string;
   vibe: string | null;
-  productImagePath: string;
-  designImagePath: string;
+  // Screen-quality previews — every view renders these.
+  productPreviewImagePath: string | null;
+  designPreviewImagePath: string | null;
+  // Full-res print files — present on the admin queue's usage of this type
+  // (for print-quality review), absent on GET /api/account/orders (never
+  // sent to a customer-facing caller).
+  productImagePath?: string | null;
+  designImagePath?: string | null;
   hasImageData?: boolean;
   // The real Printrove mockup for this order's (design, category, color)
   // combo, when its DesignProduct has one ready — preferred over the

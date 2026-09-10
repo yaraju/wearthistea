@@ -26,8 +26,8 @@ export async function GET(req: Request) {
           title: true,
           phrase: true,
           vibe: true,
-          productImagePath: true,
-          designImagePath: true,
+          productPreviewImagePath: true,
+          designPreviewImagePath: true,
           designImageData: true,
         },
       },
@@ -76,8 +76,10 @@ export async function GET(req: Request) {
       vibe: design.vibe,
       // Strip design imagery server-side for rejected orders (not just
       // hidden client-side) — no flash of the design before JS hides it.
-      productImagePath: isRejected ? null : design.productImagePath,
-      designImagePath: isRejected ? null : design.designImagePath,
+      // Only the downscaled preview is ever sent here — full-res print
+      // files never reach a customer-facing response.
+      productPreviewImagePath: isRejected ? null : design.productPreviewImagePath,
+      designPreviewImagePath: isRejected ? null : design.designPreviewImagePath,
       hasImageData: isRejected ? false : Boolean(design.designImageData),
       printroveMockupUrl: isRejected ? null : (designProduct?.mockupFrontUrl ?? null),
       trackingNumber: live?.trackingNumber ?? order.trackingNumber,

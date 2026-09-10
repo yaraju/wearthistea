@@ -98,7 +98,7 @@ HARD RULES:
 /** Print-specific target. */
 const PRINT_SPECS = `
 PRINT FILE TARGET:
-- Vertical 5:6 composition for a 4500 x 5400 px PNG.
+- Vertical 4:5 composition for a 4320 x 5400 px PNG.
 - Transparent alpha background.
 - RGB color.
 - 300 DPI metadata if supported.
@@ -339,7 +339,7 @@ ${clean(c.visualConcept)}
 ${c.vibe ? `VIBE: ${clean(c.vibe)}` : ""}
 
 COMPOSITION — FOLLOW EXACTLY, this is not a suggestion:
-The canvas is a fixed 4500x5400px vertical rectangle. Confine the entire
+The canvas is a fixed 4320x5400px vertical rectangle. Confine the entire
 illustration to the TOP 74% of that canvas (roughly the top 4000px),
 centered horizontally. The BOTTOM 26% of the canvas (the bottom ~1400px)
 MUST be left completely empty and fully transparent — no illustration

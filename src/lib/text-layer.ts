@@ -8,9 +8,13 @@ const FONT_FAMILY = "ArchivoBlack";
 
 // Must match the fixed layout described in prompts.ts's designImageArtOnly()
 // COMPOSITION section (top 74% illustration / bottom 26% empty band) and
-// PRINT_SPECS's 4500x5400 canvas — these three things have to agree or the
+// PRINT_SPECS's 4320x5400 canvas — these three things have to agree or the
 // text lands somewhere the illustration didn't actually leave empty.
-export const PRINT_CANVAS_WIDTH = 4500;
+// Width is 4:5 (0.8) — matches Printrove's live men's/women's/kids print
+// frame ratio (~0.796-0.800, verified against the catalog API), not an
+// arbitrary choice. Height/band height are unchanged from before, so the
+// 74/26 split (height-relative) stays correct without retuning.
+export const PRINT_CANVAS_WIDTH = 4320;
 export const PRINT_CANVAS_HEIGHT = 5400;
 export const PRINT_TEXT_BAND_HEIGHT = 1400;
 
@@ -108,7 +112,7 @@ export async function compositePhraseBand(
   // construction. Using `fit:"contain"` against the FULL canvas here would
   // only keep the band clear if the model happened to return exactly the
   // same aspect ratio as canvasWidth:canvasHeight; it usually doesn't
-  // (e.g. Gemini returning 944x1136 against a 4500x5400 target), so the
+  // (e.g. Gemini returning 944x1136 against a 4320x5400 target), so the
   // illustration could silently creep into (or short of) the reserved band.
   const topRegionHeight = opts.canvasHeight - opts.bandHeight;
   const illustration = await sharp(Buffer.from(illustrationB64, "base64"))

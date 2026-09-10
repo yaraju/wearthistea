@@ -17,6 +17,8 @@ interface DesignSummary {
   phrase: string;
   designImagePath: string;
   productImagePath: string;
+  designPreviewImagePath: string;
+  productPreviewImagePath: string;
   variantColor: string | null;
 }
 
@@ -42,6 +44,7 @@ export default function AdminReviewModal({
   const [err, setErr] = useState<string | null>(null);
 
   const brewedImg = design.designImagePath || design.productImagePath;
+  const brewedPreviewImg = design.designPreviewImagePath || design.productPreviewImagePath;
   const remaining = items.filter((it) => !decided[it.id]);
 
   async function review(designProductId: string, decision: "approved" | "rejected") {
@@ -124,6 +127,19 @@ export default function AdminReviewModal({
                 brewedImageAlt={`${design.title} — ${it.label}`}
                 garmentColor={design.variantColor || "Black"}
               />
+              {brewedPreviewImg && (
+                <div className="mt-2 flex items-center gap-2">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={brewedPreviewImg}
+                    alt="What the customer sees (preview quality)"
+                    className="h-10 w-10 rounded border border-gray-200 object-contain"
+                  />
+                  <p className="text-[10px] text-gray-500">
+                    Customer sees this preview-quality version — full-res above is what prints.
+                  </p>
+                </div>
+              )}
               {decided[it.id] ? (
                 <p
                   className={`mt-2 flex items-center gap-1 text-xs font-bold ${

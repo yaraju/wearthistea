@@ -2,7 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { renderConceptArt, isTransientProviderError } from "@/lib/gemini";
 import type { Concept } from "@/config/prompts";
 import { compositeOnTee } from "@/lib/mockup";
-import { saveImage, hasDurableStorage } from "@/lib/storage";
+import { saveImageWithPreview, hasDurableStorage } from "@/lib/storage";
 import { settings } from "@/config/settings";
 import { recordGenerateUsage, type RateLimitResult } from "@/lib/rate-limit";
 import type { Design } from "@prisma/client";
@@ -54,16 +54,23 @@ export async function renderDesignArtwork(
   }
 
   const base = `${design.id}-${Date.now()}`;
-  const designImagePath = await saveImage(design.batchId, `${base}-design.png`, designB64);
+  const { path: designImagePath, previewPath: designPreviewImagePath } = await saveImageWithPreview(
+    design.batchId,
+    `${base}-design.png`,
+    designB64
+  );
 
   let productImagePath = design.productImagePath;
+  let productPreviewImagePath = design.productPreviewImagePath;
   if (settings.images.generateProductShot) {
     try {
       const productB64 = await compositeOnTee(
         designB64,
         design.variantColor || settings.printify.defaultColor
       );
-      productImagePath = await saveImage(design.batchId, `${base}-product.png`, productB64);
+      const saved = await saveImageWithPreview(design.batchId, `${base}-product.png`, productB64);
+      productImagePath = saved.path;
+      productPreviewImagePath = saved.previewPath;
     } catch {
       // Mockup is optional, fallback to design file
     }
@@ -73,7 +80,9 @@ export async function renderDesignArtwork(
     where: { id: design.id },
     data: {
       designImagePath,
+      designPreviewImagePath,
       productImagePath,
+      productPreviewImagePath,
       // Only needed as a lost-file fallback on ephemeral local disk — once
       // GCS is configured, saveImage() above already either durably
       // persisted this or threw, so storing a second copy here would just
