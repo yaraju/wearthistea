@@ -5,6 +5,7 @@ import { prompts, type Concept } from "@/config/prompts";
 import { saveImageWithPreview, hasDurableStorage } from "./storage";
 import { svgToPng } from "./svg-utils";
 import { compositeOnTee } from "./mockup";
+import { renderBackDesignArtwork, type BackLayout } from "./back-design";
 import { langfuse } from "./langfuse";
 
 /**
@@ -56,6 +57,7 @@ export async function realizeDesign(designId: string, parent?: any) {
         visualConcept: design.visualConcept,
         vibe: design.vibe || undefined,
         blurb: design.blurb || undefined,
+        backPhrase: design.backPhrase || "",
         color: design.variantColor || settings.printify.defaultColor,
         artStyle: design.style === "svg" ? "svg" : "raster",
       };
@@ -96,6 +98,26 @@ export async function realizeDesign(designId: string, parent?: any) {
         console.error("Mockup update failed during realization:", err);
       }
     }
+
+    // Back print's ink color depends on garment color (isDarkGarment), same
+    // as the front art, so a color change needs it re-rendered too. Optional
+    // and non-fatal — a QR/Satori failure here must never fail a realization
+    // the buyer is waiting on for their actual purchase.
+    let backDesignImagePath = design.backDesignImagePath;
+    let backDesignPreviewImagePath = design.backDesignPreviewImagePath;
+    if (design.backPhrase) {
+      try {
+        const backB64 = await renderBackDesignArtwork(design.backPhrase, {
+          layout: (design.backLayout as BackLayout) || "upper-back",
+          color: design.variantColor || settings.printify.defaultColor,
+        });
+        const saved = await saveImageWithPreview(design.batchId, `${design.id}-back-final.png`, backB64);
+        backDesignImagePath = saved.path;
+        backDesignPreviewImagePath = saved.previewPath;
+      } catch (err) {
+        console.error("Back design render failed during realization:", err);
+      }
+    }
     storageObservation.end({ output: "success" });
 
     const updated = await prisma.design.update({
@@ -105,6 +127,12 @@ export async function realizeDesign(designId: string, parent?: any) {
         designPreviewImagePath,
         productImagePath,
         productPreviewImagePath,
+        backDesignImagePath,
+        backDesignPreviewImagePath,
+        // Ink color may have just changed (new garment color) — clear the
+        // stale PrintRove upload id so the next touch re-uploads the new art
+        // instead of reusing the old color's asset.
+        ...(design.backPhrase ? { printroveBackDesignId: null } : {}),
         // See the identical comment in /api/generate/retry — only needed as
         // a lost-file fallback when GCS isn't configured.
         designImageData: hasDurableStorage ? null : finalDesignB64,

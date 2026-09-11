@@ -35,6 +35,14 @@ model Design {
   visualConcept String  @db.Text
   vibe          String?
   blurb         String?
+  // Cheeky back-of-shirt payoff line, from the same LLM call as `phrase` —
+  // see prompts.ts's Concept.backPhrase. Nullable so pre-migration rows
+  // don't need a backfill; simply have no back print until regenerated.
+  backPhrase String?
+  // A/B/C variant for how large/where the back print sits on the garment —
+  // randomly assigned at generation time (pickRandomBackLayout in
+  // back-design.ts), flippable later by an admin. "upper-back" | "full-panel" | "chest-height".
+  backLayout String  @default("upper-back")
 
   // Pipeline mode this design was generated with ("raster" | "svg"). Source of
   // truth for how to (re)render this design — never infer this from parsing
@@ -60,6 +68,10 @@ model Design {
   // provider upload / order placement (fulfillment.ts, design-products.ts).
   productPreviewImagePath String?
   designPreviewImagePath  String?
+  // Deterministic back-print artwork (cheeky text + QR) and its preview —
+  // mirror designImagePath/designPreviewImagePath, see back-design.ts.
+  backDesignImagePath        String?
+  backDesignPreviewImagePath String?
   // Base64 copy of the print-ready design — used as fallback when the file is
   // missing (e.g. after a redeploy wipes the ephemeral filesystem on some hosts).
   designImageData  String? @db.Text
@@ -81,6 +93,11 @@ model Design {
   // Printrove's design-asset ids are 11 digits, overflowing Postgres INT4 —
   // same reason Order.printroveProductId below is already a String.
   printroveDesignId String?
+  // Mirrors printroveDesignId for the back-print asset — reused across every
+  // (category, color) combo, reset to null whenever the back art changes
+  // (color re-render, admin layout flip) so the next PrintRove touch
+  // re-uploads instead of reusing stale art.
+  printroveBackDesignId String?
 
   orders         Order[]
   designProducts DesignProduct[]

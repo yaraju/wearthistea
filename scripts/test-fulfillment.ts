@@ -9,16 +9,30 @@ async function main() {
   const createOrder = process.argv.includes("--order");
   
   console.log(`Starting test fulfillment (createOrder: ${createOrder})`);
-  
-  // A tiny 1x1 transparent PNG
-  const sampleDesign = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==";
-  
+
+  // A small opaque square on a transparent canvas — big enough for
+  // trimDesign()'s trim() step (which needs a real content bounding box,
+  // not a 1x1 pixel) to actually exercise the trim/fit-to-frame logic.
+  const sharp = (await import("sharp")).default;
+  const sampleDesign = (
+    await sharp({ create: { width: 300, height: 300, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+      .composite([{ input: await sharp({ create: { width: 100, height: 100, channels: 4, background: { r: 220, g: 20, b: 60, alpha: 1 } } }).png().toBuffer(), left: 100, top: 100 }])
+      .png()
+      .toBuffer()
+  ).toString("base64");
+
   const input = {
     referenceNumber: "TEST-" + Date.now(),
     title: "Test Design " + new Date().toISOString(),
     description: "A test design uploaded via script",
     designBase64: sampleDesign,
     designFileName: "test-design.png",
+    // Same sample PNG reused for the back placement — this is only testing
+    // that the front+back upload/placement wiring works end to end, not
+    // real back artwork (see back-design.ts for actual back-print rendering).
+    backDesignBase64: sampleDesign,
+    backDesignFileName: "test-design-back.png",
+    backLayout: "upper-back",
     priceCents: 1000,
     quantity: 1,
     variant: { size: "M", color: "Black" },

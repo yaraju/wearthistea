@@ -17,6 +17,7 @@ export default function DesignProductPreview({
   previewImageUrl,
   brewedImageUrl,
   brewedImageAlt,
+  backPreviewImageUrl,
   garmentColor,
   showDisclaimer = false,
   onStatus,
@@ -33,6 +34,10 @@ export default function DesignProductPreview({
   previewImageUrl?: string;
   brewedImageUrl: string;
   brewedImageAlt: string;
+  /** Locally-composited back print (cheeky text + QR, see back-design.ts) —
+   * shown instantly, before PrintRove's async back_mockup is ready. Same
+   * transparent-PNG treatment as the front brewed/preview slides. */
+  backPreviewImageUrl?: string;
   /** The color this design's art was actually rendered against (Design.
    * variantColor) — the brewed/preview slides are transparent PNGs, so
    * without this they render on a flat neutral background that doesn't
@@ -108,6 +113,7 @@ export default function DesignProductPreview({
   const labeled = [
     previewImageUrl && { url: previewImageUrl, label: "Customer sees this" },
     { url: brewedImageUrl, label: previewImageUrl ? "Full-res — prints" : undefined },
+    backPreviewImageUrl && { url: backPreviewImageUrl, label: "Back" },
     data?.mockupFrontUrl && { url: data.mockupFrontUrl, label: undefined },
     data?.mockupBackUrl && { url: data.mockupBackUrl, label: undefined },
   ].filter((s): s is { url: string; label: string | undefined } => Boolean(s));
@@ -115,7 +121,8 @@ export default function DesignProductPreview({
   const current = labeled[slide] ?? labeled[0];
   // The preview/brewed slides (transparent PNGs) need the garment color
   // behind them — the mockup slides are already complete photos.
-  const isBrewedSlide = current.url === brewedImageUrl || current.url === previewImageUrl;
+  const isBrewedSlide =
+    current.url === brewedImageUrl || current.url === previewImageUrl || current.url === backPreviewImageUrl;
 
   return (
     <div>

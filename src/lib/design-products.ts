@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { printroveProduct } from "@/config/settings";
 import { uploadDesign, createProduct, getProduct, trimDesign } from "@/lib/printrove";
+import type { BackLayout } from "@/lib/back-design";
 import { readImageAsBase64 } from "@/lib/storage";
 import { logger } from "@/lib/logger";
 import type { DesignProduct } from "@prisma/client";
@@ -112,12 +113,47 @@ async function createDesignProduct(
     }
 
     const imageSize = { width: trimmed.width, height: trimmed.height };
+
+    // Back print (cheeky text + QR) — best-effort: a failure here shouldn't
+    // block the front-only product from being created, same reasoning as
+    // renderDesignArtwork's own non-fatal back-render try/catch.
+    let back: { designId: number; imageSize: { width: number; height: number }; layout: BackLayout } | undefined;
+    if (design.backDesignImagePath) {
+      try {
+        const backBase64 = await readImageAsBase64(design.backDesignImagePath);
+        const trimmedBack = await trimDesign(backBase64);
+
+        let printroveBackDesignId: number;
+        if (design.printroveBackDesignId) {
+          printroveBackDesignId = Number(design.printroveBackDesignId);
+        } else {
+          printroveBackDesignId = await uploadDesign(`${design.id}-back.png`, trimmedBack.base64);
+          await prisma.design.update({
+            where: { id: design.id },
+            data: { printroveBackDesignId: String(printroveBackDesignId) },
+          });
+        }
+
+        back = {
+          designId: printroveBackDesignId,
+          imageSize: { width: trimmedBack.width, height: trimmedBack.height },
+          layout: (design.backLayout as BackLayout) || "upper-back",
+        };
+      } catch (err) {
+        logger.error("[design-products] Back design upload failed, creating front-only product", {
+          designId,
+          error: err,
+        });
+      }
+    }
+
     const created = await createProduct({
       name: `${design.title} — ${product.categoryLabel} preview`,
       designId: printroveDesignId,
       baseVariantId,
       product,
       imageSize,
+      back,
     });
 
     // Upsert, not create: a concurrent brew-task run and an on-demand

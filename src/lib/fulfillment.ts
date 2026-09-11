@@ -93,6 +93,18 @@ export async function pushOrderToProvider(orderId: string): Promise<PushOrderRes
     const description =
       design.blurb ?? `${design.phrase} — an original wearthistea drop. ${design.visualConcept}`;
 
+    // Back print (cheeky text + QR) — best-effort, same reasoning as the
+    // front-art fallback above: a missing/unreadable back file shouldn't
+    // block a real order from shipping front-only.
+    let backDesignBase64: string | null = null;
+    if (design.backDesignImagePath) {
+      try {
+        backDesignBase64 = await readImageAsBase64(design.backDesignImagePath);
+      } catch {
+        logger.error("[fulfillment] Back design file missing, shipping front-only", { orderId });
+      }
+    }
+
     const result = await provider.fulfill({
       referenceNumber: order.id,
       title: design.title,
@@ -107,6 +119,14 @@ export async function pushOrderToProvider(orderId: string): Promise<PushOrderRes
       },
       category: order.productCategory,
       printroveDesignId: design.printroveDesignId,
+      ...(backDesignBase64
+        ? {
+            backDesignBase64,
+            backDesignFileName: `${design.id}-back.png`,
+            printroveBackDesignId: design.printroveBackDesignId,
+            backLayout: design.backLayout,
+          }
+        : {}),
       customer: order.recipientName
         ? {
             name: order.recipientName,
@@ -132,6 +152,12 @@ export async function pushOrderToProvider(orderId: string): Promise<PushOrderRes
       await prisma.design.update({
         where: { id: design.id },
         data: { printroveDesignId: result.printroveDesignId },
+      });
+    }
+    if (result.printroveBackDesignId && !design.printroveBackDesignId) {
+      await prisma.design.update({
+        where: { id: design.id },
+        data: { printroveBackDesignId: result.printroveBackDesignId },
       });
     }
 

@@ -19,6 +19,7 @@ interface DesignSummary {
   productImagePath: string;
   designPreviewImagePath: string;
   productPreviewImagePath: string;
+  backDesignPreviewImagePath: string | null;
   variantColor: string | null;
 }
 
@@ -127,6 +128,7 @@ export default function AdminReviewModal({
                 brewedImageUrl={brewedImg}
                 brewedImageAlt={`${design.title} — ${it.label}`}
                 garmentColor={design.variantColor || "Black"}
+                backPreviewImageUrl={design.backDesignPreviewImagePath || undefined}
               />
               {decided[it.id] ? (
                 <p

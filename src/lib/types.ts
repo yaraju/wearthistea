@@ -24,10 +24,13 @@ export interface DesignDTO {
   visualConcept: string;
   vibe: string | null;
   blurb: string | null;
+  backPhrase: string | null; // cheeky back-of-shirt payoff line
+  backLayout: string; // "upper-back" | "full-panel" | "chest-height" — A/B/C variant
   variantColor: string | null; // garment color this art was rendered against
   // Screen-quality previews — every customer-facing view renders these.
   productPreviewImagePath: string;
   designPreviewImagePath: string;
+  backDesignPreviewImagePath: string | null;
   // Full-res print files are never sent to a customer-facing caller (see
   // /api/generate/retry) — optional/absent there, present only for the
   // brief window before rendering when the initial stub row is empty.

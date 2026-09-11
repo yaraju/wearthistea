@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { renderConceptArt, isTransientProviderError } from "@/lib/gemini";
 import type { Concept } from "@/config/prompts";
 import { compositeOnTee } from "@/lib/mockup";
+import { renderBackDesignArtwork, type BackLayout } from "@/lib/back-design";
 import { saveImageWithPreview, hasDurableStorage } from "@/lib/storage";
 import { settings } from "@/config/settings";
 import { recordGenerateUsage, type RateLimitResult } from "@/lib/rate-limit";
@@ -38,6 +39,7 @@ export async function renderDesignArtwork(
     visualConcept: design.visualConcept,
     vibe: design.vibe ?? undefined,
     blurb: design.blurb ?? undefined,
+    backPhrase: design.backPhrase || "",
     color: design.variantColor || settings.printify.defaultColor,
     artStyle: design.style === "svg" ? "svg" : "raster",
   };
@@ -76,6 +78,28 @@ export async function renderDesignArtwork(
     }
   }
 
+  // Back print (cheeky payoff line + QR). Deterministic, no LLM/image-model
+  // call — cheap enough to (re)render on every front render, which also
+  // keeps it fresh whenever backPhrase/backLayout/variantColor change (e.g.
+  // an admin "flip" or a regenerate clone). Non-fatal: a Satori/QR hiccup
+  // must never fail the front render the customer already spent
+  // rate-limit budget waiting on.
+  let backDesignImagePath = design.backDesignImagePath;
+  let backDesignPreviewImagePath = design.backDesignPreviewImagePath;
+  if (design.backPhrase) {
+    try {
+      const backB64 = await renderBackDesignArtwork(design.backPhrase, {
+        layout: (design.backLayout as BackLayout) || "upper-back",
+        color: design.variantColor || settings.printify.defaultColor,
+      });
+      const saved = await saveImageWithPreview(design.batchId, `${base}-back.png`, backB64);
+      backDesignImagePath = saved.path;
+      backDesignPreviewImagePath = saved.previewPath;
+    } catch {
+      // Back print is optional — front art is what the customer is waiting on.
+    }
+  }
+
   return prisma.design.update({
     where: { id: design.id },
     data: {
@@ -83,6 +107,8 @@ export async function renderDesignArtwork(
       designPreviewImagePath,
       productImagePath,
       productPreviewImagePath,
+      backDesignImagePath,
+      backDesignPreviewImagePath,
       // Only needed as a lost-file fallback on ephemeral local disk — once
       // GCS is configured, saveImage() above already either durably
       // persisted this or threw, so storing a second copy here would just

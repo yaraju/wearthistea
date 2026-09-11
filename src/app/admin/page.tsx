@@ -25,6 +25,7 @@ interface PendingReviewDesign {
   productImagePath: string;
   designPreviewImagePath: string;
   productPreviewImagePath: string;
+  backDesignPreviewImagePath: string | null;
   variantColor: string | null;
   products: { id: string; category: string; label: string; status: string }[];
 }

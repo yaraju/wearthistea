@@ -75,7 +75,7 @@ export async function POST(req: Request) {
     // only the downscaled preview. designImagePath/productImagePath stay
     // server-side (read by fulfillment.ts / design-products.ts).
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { designImagePath, productImagePath, designImageData, ...safeDesign } = updated;
+    const { designImagePath, productImagePath, designImageData, backDesignImagePath, ...safeDesign } = updated;
     return NextResponse.json({ design: safeDesign });
   } catch (err) {
     const transient = isTransientProviderError(err);

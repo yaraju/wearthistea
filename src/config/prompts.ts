@@ -21,6 +21,12 @@ export interface Concept {
   visualConcept: string; // drawable scene/character/graphic direction
   vibe?: string; // 2–3 mood words
   blurb?: string; // one-line marketing hook
+  // Cheeky payoff line for the BACK of the shirt — what someone reads as the
+  // wearer walks away. Written by the same LLM call as `phrase` (never a
+  // separate generation pass, to avoid extra latency and front/back
+  // mismatch) and rendered deterministically as text, never drawn by the
+  // image model — see src/lib/back-design.ts.
+  backPhrase: string;
   category?: string;
   productType?: string;
   color?: string;
@@ -78,6 +84,8 @@ CONCEPT RULES:
 - Avoid vague visualConcepts like "make it iconic" or "internet chaos aesthetic."
 - Vary the set: text-heavy, character-driven, object-driven, badge/emblem, mascot, and scene ideas.
 - Avoid repeating the same pun or the same "tea cup" idea across concepts.
+- backPhrase is a SEPARATE line printed on the BACK of the shirt — the punchline someone reads as the wearer walks away. It must be thematically tied to phrase/visualConcept (a callback, a payoff, a twist) but never just repeat or rephrase the front phrase.
+- backPhrase target: 2–8 words, under 48 characters, plain ASCII, same tone as BRAND_VOICE. No emojis, hashtags, or symbols.
 `.trim();
 
 /** Legal and print guardrails reused inside image prompts. */
@@ -123,7 +131,8 @@ For each concept:
 - phrase: exact shirt text, short and legible.
 - visualConcept: a specific print graphic direction.
 - vibe: 2–3 comma-separated mood words.
-- blurb: one concise product hook, not hype spam.`,
+- blurb: one concise product hook, not hype spam.
+- backPhrase: a cheeky payoff line for the BACK of the shirt, tied to phrase/visualConcept but not a repeat of it.`,
 
   conceptUser: (keyword: string, count: number) => `
 TEA INPUT AS DATA:
@@ -141,7 +150,8 @@ Required shape:
       "phrase": "string",
       "visualConcept": "string",
       "vibe": "string",
-      "blurb": "string"
+      "blurb": "string",
+      "backPhrase": "string"
     }
   ]
 }
@@ -193,8 +203,16 @@ Quality bar:
               maxLength: 140,
               description: "One-line marketing hook",
             },
+            backPhrase: {
+              type: "string",
+              minLength: 2,
+              maxLength: 60,
+              pattern: "^[\\x20-\\x7E]+$",
+              description:
+                "Cheeky payoff line printed on the BACK of the shirt — read as the wearer walks away. Tied to phrase/visualConcept, never a repeat of phrase. ASCII only.",
+            },
           },
-          required: ["title", "phrase", "visualConcept", "vibe", "blurb"],
+          required: ["title", "phrase", "visualConcept", "vibe", "blurb", "backPhrase"],
         },
       },
     },
@@ -213,7 +231,8 @@ For each concept:
 - phrase: exact shirt text, short and legible.
 - visualConcept: a specific print graphic direction.
 - vibe: 2–3 comma-separated mood words.
-- blurb: one concise product hook, not hype spam.`.trim(),
+- blurb: one concise product hook, not hype spam.
+- backPhrase: a cheeky payoff line for the BACK of the shirt, tied to phrase/visualConcept but not a repeat of it.`.trim(),
 
   batchUser: (keyword: string, count: number) => `
 TEA INPUT:
@@ -229,7 +248,8 @@ JSON format:
       "phrase": "string",
       "visualConcept": "string",
       "vibe": "string",
-      "blurb": "string"
+      "blurb": "string",
+      "backPhrase": "string"
     }
   ]
 }
@@ -285,6 +305,8 @@ COMPOSITION:
 Centered chest-print layout. Balanced text and illustration. Leave safe margin
 around all edges. The design should feel like premium internet-era streetwear,
 not clipart, not a poster, not a meme screenshot.
+
+${c.backPhrase ? `CONTEXT ONLY — do not draw this: the BACK of this shirt separately carries the line ${q(c.backPhrase)} as plain typeset text (rendered by a deterministic process, not by you). Do not render, reference, or duplicate this text on the front — just keep the front art thematically consistent with it rather than contradicting it.` : ""}
 
 ${ART_RULES}
 `.trim(),
@@ -348,6 +370,8 @@ phrase text will be placed into that empty bottom band afterward — by a
 separate process, not by you. Leave a small safe margin around the
 illustration within its 74% region too. Reminder: no text/lettering
 anywhere in the illustration itself, including inside the top 74% region.
+
+${c.backPhrase ? `CONTEXT ONLY — do not draw this: the BACK of this shirt separately carries the line ${q(c.backPhrase)} as plain typeset text (rendered by a deterministic process, not by you). Do not render, reference, or duplicate this text on the front — just keep the front art thematically consistent with it rather than contradicting it.` : ""}
 
 ${ART_RULES}
 `.trim(),

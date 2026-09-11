@@ -112,7 +112,10 @@ export default function KeywordStudio() {
       if (!res.ok) throw new Error(data.error ?? "Something went wrong.");
       setResult(data as GenerateResponse);
       setPhase("done");
-      track("generate_designs", { keyword: tea });
+      track("generate_designs", {
+        keyword: tea,
+        backLayouts: (data as GenerateResponse).designs.map((d) => d.backLayout).join(","),
+      });
       // Concepts come back fast; each design's artwork is rendered by its own
       // request so no single request has to finish the whole batch inside
       // the hosting proxy's timeout. Each card flips from "generating" to

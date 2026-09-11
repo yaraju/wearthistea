@@ -51,6 +51,17 @@ export interface FulfillInput {
    * Design.printroveDesignId for why (Printrove's ids overflow Int32).
    */
   printroveDesignId?: string | null;
+  /**
+   * Optional back-print placement (cheeky text + QR, see back-design.ts).
+   * Only acted on by printroveProvider today — printifyProvider ignores
+   * these fields; its own back-placement support is a separate, not-yet-
+   * scoped follow-up. Mirrors designBase64/designFileName/printroveDesignId.
+   */
+  backDesignBase64?: string | null;
+  backDesignFileName?: string | null;
+  printroveBackDesignId?: string | null;
+  /** A/B/C back-print layout variant — see Design.backLayout. */
+  backLayout?: string | null;
 }
 
 export interface FulfillResult {
@@ -65,6 +76,9 @@ export interface FulfillResult {
    * calls can reuse it. Null for providers without this concept.
    */
   printroveDesignId: string | null;
+  /** Mirrors printroveDesignId for the back-print asset. Null when no back
+   *  design was provided, or for providers without this concept. */
+  printroveBackDesignId: string | null;
 }
 
 export interface VariantOptions {

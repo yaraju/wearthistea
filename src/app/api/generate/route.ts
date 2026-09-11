@@ -5,6 +5,7 @@ import { generateConcepts, isTransientProviderError } from "@/lib/gemini";
 import { getProvider } from "@/lib/print-provider";
 import { settings } from "@/config/settings";
 import { prompts } from "@/config/prompts";
+import { pickRandomBackLayout } from "@/lib/back-design";
 import { langfuse, getTraceId } from "@/lib/langfuse";
 import { logger } from "@/lib/logger";
 import { friendlyError } from "@/lib/error-messages";
@@ -102,6 +103,8 @@ export async function POST(req: Request) {
             visualConcept: c.visualConcept,
             vibe: c.vibe ?? null,
             blurb: c.blurb ?? null,
+            backPhrase: c.backPhrase,
+            backLayout: pickRandomBackLayout(),
             style,
             designPrompt: prompts.designImage(c),
             productPrompt: `[mockup composite of clean design on ${resolvedColor} tee]`,

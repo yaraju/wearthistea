@@ -183,6 +183,7 @@ export default function PickDesignModal({
           transaction_id: data.order.id,
           currency: "INR",
           value: data.order.unitPriceCents * data.order.quantity,
+          backLayout: design.backLayout,
         });
         onPlaced();
         return;
@@ -239,6 +240,7 @@ export default function PickDesignModal({
                 transaction_id: orderId,
                 currency: "INR",
                 value: createData.amountPaise / 100,
+                backLayout: design.backLayout,
               });
               resolve();
             } catch {
@@ -305,6 +307,7 @@ export default function PickDesignModal({
               brewedImageUrl={brewedImg}
               brewedImageAlt={`${design.title} — design art`}
               garmentColor={design.variantColor || "Black"}
+              backPreviewImageUrl={design.backDesignPreviewImagePath || undefined}
               showDisclaimer
             />
           ) : (

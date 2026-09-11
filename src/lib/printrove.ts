@@ -1,5 +1,6 @@
 import sharp from "sharp";
 import { settings, printroveProduct, type PrintroveProductConfig } from "@/config/settings";
+import { backBoxForLayout, type BackLayout } from "@/lib/back-design";
 import type {
   FulfillInput,
   FulfillResult,
@@ -166,6 +167,39 @@ function frontDesign(designId: number, dimensions: { width: number; height: numb
   return { front: { id: designId, dimensions } };
 }
 
+function backDesign(designId: number, dimensions: { width: number; height: number; top: number; left: number }) {
+  return { back: { id: designId, dimensions } };
+}
+
+/**
+ * The back print's placement box, in the same coordinate space as the front
+ * `frame`. Verified live against Printrove's catalog (`/api/product/{id}`):
+ * back_print_width/height equal front_print_width/height exactly for every
+ * category we sell (Men's, Women's, Toddler, Kids) — so the back frame is
+ * the SAME frame as the front, not a separate value to configure. What
+ * actually controls the real printed footprint is the sub-box computed here
+ * from the design's A/B/C `backLayout` (see back-design.ts's
+ * backBoxForLayout) — Printrove auto-trims uploaded art to its content
+ * bounding box and rescales it to fill whatever box it's given (see
+ * trimDesign()'s doc comment above), so passing the full frame here would
+ * always produce a full-panel print regardless of layout.
+ */
+function fitBackDesignToFrame(
+  imgWidth: number,
+  imgHeight: number,
+  frame: { width: number; height: number },
+  layout: BackLayout
+): { width: number; height: number; top: number; left: number } {
+  const box = backBoxForLayout(layout, frame.width, frame.height);
+  const fitted = fitDesignToFrame(imgWidth, imgHeight, { width: box.width, height: box.height });
+  return {
+    width: fitted.width,
+    height: fitted.height,
+    left: box.left + fitted.left,
+    top: box.top + fitted.top,
+  };
+}
+
 // ── Create product (adds the design-on-blank to your Product Library) ─────────
 // Exported: design-products.ts calls this directly for preview-product
 // creation (one per design/category/color, at a fixed previewSize), same as
@@ -176,15 +210,28 @@ export async function createProduct(opts: {
   baseVariantId: number;
   product: PrintroveProductConfig;
   imageSize: { width: number; height: number };
+  /** Optional back placement — verified live to be accepted alongside `front`
+   *  in the same /products call (see fitBackDesignToFrame's doc comment). */
+  back?: { designId: number; imageSize: { width: number; height: number }; layout: BackLayout };
 }): Promise<{ productId: number; variantId: number | null }> {
   const dimensions = fitDesignToFrame(opts.imageSize.width, opts.imageSize.height, opts.product.frame);
+  const design: Json = { ...frontDesign(opts.designId, dimensions) };
+  if (opts.back) {
+    const backDimensions = fitBackDesignToFrame(
+      opts.back.imageSize.width,
+      opts.back.imageSize.height,
+      opts.product.frame,
+      opts.back.layout
+    );
+    Object.assign(design, backDesign(opts.back.designId, backDimensions));
+  }
   const data = await api("/products", {
     method: "POST",
     json: {
       name: opts.name.slice(0, 120),
       product_id: opts.product.subtypeId,
       is_plain: false,
-      design: frontDesign(opts.designId, dimensions),
+      design,
       variants: [{ product_id: opts.baseVariantId }],
     },
   });
@@ -238,22 +285,32 @@ async function createOrder(opts: {
   customer: NonNullable<FulfillInput["customer"]>;
   product: PrintroveProductConfig;
   imageSize: { width: number; height: number };
+  back?: { designId: number; imageSize: { width: number; height: number }; layout: BackLayout };
 }): Promise<{ orderId: string | null; trackingNumber: string | null }> {
   const c = opts.customer;
   const phoneDigits = String(c.phone).replace(/\D/g, "");
 
-  // order_products: prefer a concrete variant_id; otherwise product_id + design.
-  const orderProduct: Json =
-    opts.variantId != null
-      ? { variant_id: opts.variantId, quantity: opts.quantity }
-      : {
-          product_id: opts.productId,
-          design: frontDesign(
-            opts.designId,
-            fitDesignToFrame(opts.imageSize.width, opts.imageSize.height, opts.product.frame)
-          ),
-          quantity: opts.quantity,
-        };
+  // order_products: prefer a concrete variant_id (the design, front+back
+  // included, is already attached at product-creation time); otherwise fall
+  // back to product_id + a freshly-built design payload.
+  let orderProduct: Json;
+  if (opts.variantId != null) {
+    orderProduct = { variant_id: opts.variantId, quantity: opts.quantity };
+  } else {
+    const design: Json = {
+      ...frontDesign(opts.designId, fitDesignToFrame(opts.imageSize.width, opts.imageSize.height, opts.product.frame)),
+    };
+    if (opts.back) {
+      Object.assign(
+        design,
+        backDesign(
+          opts.back.designId,
+          fitBackDesignToFrame(opts.back.imageSize.width, opts.back.imageSize.height, opts.product.frame, opts.back.layout)
+        )
+      );
+    }
+    orderProduct = { product_id: opts.productId, design, quantity: opts.quantity };
+  }
 
   const data = await api("/orders", {
     method: "POST",
@@ -608,12 +665,27 @@ export async function fulfill(input: FulfillInput): Promise<FulfillResult> {
     ? Number(input.printroveDesignId)
     : await uploadDesign(input.designFileName, trimmed.base64);
   const imageSize = { width: trimmed.width, height: trimmed.height };
+
+  let back: { designId: number; imageSize: { width: number; height: number }; layout: BackLayout } | undefined;
+  if (input.backDesignBase64 && input.backDesignFileName) {
+    const trimmedBack = await trimDesign(input.backDesignBase64);
+    const backDesignId = input.printroveBackDesignId
+      ? Number(input.printroveBackDesignId)
+      : await uploadDesign(input.backDesignFileName, trimmedBack.base64);
+    back = {
+      designId: backDesignId,
+      imageSize: { width: trimmedBack.width, height: trimmedBack.height },
+      layout: (input.backLayout as BackLayout) || "upper-back",
+    };
+  }
+
   const { productId, variantId } = await createProduct({
     name: input.title,
     designId,
     baseVariantId,
     product,
     imageSize,
+    back,
   });
 
   let orderId: string | null = null;
@@ -630,12 +702,20 @@ export async function fulfill(input: FulfillInput): Promise<FulfillResult> {
       customer: input.customer,
       product,
       imageSize,
+      back,
     });
     orderId = res.orderId;
     trackingNumber = res.trackingNumber;
   }
 
-  return { productId: String(productId), orderId, url: null, trackingNumber, printroveDesignId: String(designId) };
+  return {
+    productId: String(productId),
+    orderId,
+    url: null,
+    trackingNumber,
+    printroveDesignId: String(designId),
+    printroveBackDesignId: back ? String(back.designId) : null,
+  };
 }
 
 export const printroveProvider: PrintProvider = { name: "printrove", options, fulfill };

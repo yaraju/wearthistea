@@ -47,6 +47,7 @@ const DUMMY_CONCEPTS: Concept[] = [
       "A bold open book with a speech bubble full of ellipsis dots, flat streetwear graphic style.",
     vibe: "sarcastic, witty, online",
     blurb: "For everyone who has ever had to say it.",
+    backPhrase: "You Weren't Reading It Anyway",
   },
   {
     title: "Main Character Energy",
@@ -55,6 +56,7 @@ const DUMMY_CONCEPTS: Concept[] = [
       "A clapperboard with a crown on top, clean line-art, high-contrast two-color palette.",
     vibe: "chaotic, confident, drama",
     blurb: "The protagonist has logged on.",
+    backPhrase: "Exit, Stage Main Character",
   },
   {
     title: "No Cap",
@@ -63,6 +65,7 @@ const DUMMY_CONCEPTS: Concept[] = [
       "A baseball cap with a red X through it, bold badge emblem layout, black and white.",
     vibe: "blunt, casual, internet",
     blurb: "Telling the truth has never looked this good.",
+    backPhrase: "Verified, Unlike Your Ex",
   },
   {
     title: "Spill It",
@@ -71,6 +74,7 @@ const DUMMY_CONCEPTS: Concept[] = [
       "An overflowing teacup with steam rising in the shape of a gossip speech bubble, minimal flat art.",
     vibe: "messy, fun, relatable",
     blurb: "The tea is hot. The shirt is hotter.",
+    backPhrase: "More Tea Behind Me",
   },
   {
     title: "Sent on Read",
@@ -79,6 +83,7 @@ const DUMMY_CONCEPTS: Concept[] = [
       "Two blue checkmarks inside a broken heart, street-art stencil style, limited palette.",
     vibe: "petty, dry, chronically online",
     blurb: "We've all been there.",
+    backPhrase: "No Reply Necessary",
   },
 ];
 

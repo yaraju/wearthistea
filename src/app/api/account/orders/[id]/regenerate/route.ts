@@ -94,6 +94,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       visualConcept: design.visualConcept,
       vibe: design.vibe,
       blurb: design.blurb,
+      backPhrase: design.backPhrase,
+      backLayout: design.backLayout,
       style: design.style,
       designPrompt: design.designPrompt,
       productPrompt: design.productPrompt,
