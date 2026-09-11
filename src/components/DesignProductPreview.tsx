@@ -14,6 +14,7 @@ import { getColorCode } from "@/lib/colors";
 export default function DesignProductPreview({
   designId,
   category,
+  previewImageUrl,
   brewedImageUrl,
   brewedImageAlt,
   garmentColor,
@@ -22,13 +23,22 @@ export default function DesignProductPreview({
 }: {
   designId: string;
   category: string;
+  /** Admin-only: the downscaled preview-quality version of brewedImageUrl —
+   * what a customer actually sees. When given, it's slide 1 (before the
+   * full-res brewedImageUrl), so admin reviews customer-view → print-file →
+   * mockups in one carousel instead of a separate tiny comparison thumbnail
+   * (which read as distorted at small size even when it wasn't). Omitted
+   * entirely on the customer-facing usage of this component, which only
+   * ever has the preview anyway. */
+  previewImageUrl?: string;
   brewedImageUrl: string;
   brewedImageAlt: string;
   /** The color this design's art was actually rendered against (Design.
-   * variantColor) — the brewed slide is a transparent PNG, so without this
-   * it renders on a flat neutral background that doesn't match the garment
-   * it'll actually print on. Only applied to the brewed slide; Printrove's
-   * mockup slides are already full photos with their own background. */
+   * variantColor) — the brewed/preview slides are transparent PNGs, so
+   * without this they render on a flat neutral background that doesn't
+   * match the garment it'll actually print on. Only applied to those two
+   * slides; Printrove's mockup slides are already full photos with their
+   * own background. */
   garmentColor: string;
   showDisclaimer?: boolean;
   onStatus?: (data: DesignProductDTO) => void;
@@ -95,13 +105,17 @@ export default function DesignProductPreview({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [designId, category]);
 
-  const slides = [brewedImageUrl, data?.mockupFrontUrl, data?.mockupBackUrl].filter(
-    (s): s is string => Boolean(s)
-  );
-  const current = slides[slide] ?? brewedImageUrl;
-  // Only the brewed slide (index 0, a transparent PNG) needs the garment
-  // color behind it — the mockup slides are already complete photos.
-  const isBrewedSlide = current === brewedImageUrl;
+  const labeled = [
+    previewImageUrl && { url: previewImageUrl, label: "Customer sees this" },
+    { url: brewedImageUrl, label: previewImageUrl ? "Full-res — prints" : undefined },
+    data?.mockupFrontUrl && { url: data.mockupFrontUrl, label: undefined },
+    data?.mockupBackUrl && { url: data.mockupBackUrl, label: undefined },
+  ].filter((s): s is { url: string; label: string | undefined } => Boolean(s));
+  const slides = labeled.map((s) => s.url);
+  const current = labeled[slide] ?? labeled[0];
+  // The preview/brewed slides (transparent PNGs) need the garment color
+  // behind them — the mockup slides are already complete photos.
+  const isBrewedSlide = current.url === brewedImageUrl || current.url === previewImageUrl;
 
   return (
     <div>
@@ -111,10 +125,15 @@ export default function DesignProductPreview({
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={current}
+          src={current.url}
           alt={brewedImageAlt}
           className="h-full w-full object-contain"
         />
+        {current.label && (
+          <div className="absolute left-2 top-2 rounded-full bg-ink/80 px-2.5 py-1 font-mono text-[10px] uppercase tracking-wide text-paper">
+            {current.label}
+          </div>
+        )}
         {data?.status === "pending" && (
           <div className="absolute bottom-2 right-2 flex items-center gap-1.5 rounded-full bg-ink/80 px-2.5 py-1 font-mono text-[10px] text-paper">
             <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> rendering preview…

@@ -302,12 +302,6 @@ function QueueCard({ row, onChange }: { row: Row; onChange: () => void }) {
   }
 
   const img = row.printroveMockupUrl || row.productImagePath || row.designImagePath;
-  // Shown alongside the full-res image above so admin can catch any
-  // mismatch between what a customer actually sees and what gets sent to
-  // Printrove for printing — not shown when the main image is already
-  // Printrove's own hosted mockup (that's what everyone sees either way).
-  const previewImg =
-    !row.printroveMockupUrl && (row.productPreviewImagePath || row.designPreviewImagePath);
   const isPending = row.status === "pending";
   const isFailed = row.status === "failed";
   const hasArtwork = Boolean(row.hasImageData);
@@ -322,33 +316,14 @@ function QueueCard({ row, onChange }: { row: Row; onChange: () => void }) {
     <div className="sticker flex flex-col overflow-hidden rounded-2xl bg-paper-2">
       <div className="relative aspect-[4/5] alpha-grid">
         {img ? (
-          <>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={img}
-              alt={`${row.title} — “${row.phrase}”`}
-              loading="lazy"
-              decoding="async"
-              className="h-full w-full object-contain"
-            />
-            {previewImg && (
-              <div className="absolute bottom-1 right-1 rounded border border-black/10 bg-white/90 p-0.5 shadow">
-                {/* Height-only sizing, capped width as a safety net — a
-                    forced square box pillarboxed this non-square design
-                    hard enough to read as distorted at a glance, even
-                    though object-contain never actually stretches it. */}
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={previewImg}
-                  alt="What the customer sees (preview quality)"
-                  title="What the customer sees (preview quality)"
-                  loading="lazy"
-                  decoding="async"
-                  className="h-14 max-w-14 object-contain"
-                />
-              </div>
-            )}
-          </>
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={img}
+            alt={`${row.title} — “${row.phrase}”`}
+            loading="lazy"
+            decoding="async"
+            className="h-full w-full object-contain"
+          />
         ) : (
           <div className="grid h-full place-items-center font-mono text-xs text-ink-soft">
             no artwork
