@@ -142,13 +142,24 @@ function fitDesignToFrame(
   };
 }
 
-/** Real pixel dimensions of a base64-encoded design PNG, for placement. */
-export async function designPixelSize(base64: string): Promise<{ width: number; height: number }> {
-  const meta = await sharp(Buffer.from(base64, "base64")).metadata();
-  if (!meta.width || !meta.height) {
-    throw new Error("Could not read design image dimensions.");
-  }
-  return { width: meta.width, height: meta.height };
+/**
+ * Trim a base64 PNG's transparent padding down to its tight content
+ * bounding box, and return that trimmed image alongside its real pixel
+ * size. Printrove auto-trims an uploaded design's transparent padding
+ * before compositing it — verified live: a design canvas at 928x1152
+ * (ratio 0.806, with generous margins around the art) was stored by
+ * Printrove as an 618x976 (ratio 0.633) file once uploaded. Computing
+ * fitDesignToFrame() from the UNTRIMMED canvas size against Printrove's
+ * TRIMMED content produced a real, visible aspect-ratio mismatch (the
+ * fitted box was shaped for the padded canvas, not the actual printed
+ * content) — trimming ourselves before upload, and using the trimmed size
+ * for every placement calculation (including a design already uploaded
+ * under the old untrimmed behavior), keeps the two in sync regardless of
+ * whether Printrove's own trim exactly matches ours.
+ */
+export async function trimDesign(base64: string): Promise<{ base64: string; width: number; height: number }> {
+  const { data, info } = await sharp(Buffer.from(base64, "base64")).trim().toBuffer({ resolveWithObject: true });
+  return { base64: data.toString("base64"), width: info.width, height: info.height };
 }
 
 function frontDesign(designId: number, dimensions: { width: number; height: number; top: number; left: number }) {
@@ -586,10 +597,11 @@ export async function fulfill(input: FulfillInput): Promise<FulfillResult> {
   // reason to re-upload the same artwork. Still always calls createProduct
   // for THIS variant's actual size — a cached preview product (built at
   // previewSize) is never reused here; see the DesignProduct doc comment.
+  const trimmed = await trimDesign(input.designBase64);
   const designId = input.printroveDesignId
     ? Number(input.printroveDesignId)
-    : await uploadDesign(input.designFileName, input.designBase64);
-  const imageSize = await designPixelSize(input.designBase64);
+    : await uploadDesign(input.designFileName, trimmed.base64);
+  const imageSize = { width: trimmed.width, height: trimmed.height };
   const { productId, variantId } = await createProduct({
     name: input.title,
     designId,

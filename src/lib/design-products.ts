@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { printroveProduct } from "@/config/settings";
-import { uploadDesign, createProduct, getProduct, designPixelSize } from "@/lib/printrove";
+import { uploadDesign, createProduct, getProduct, trimDesign } from "@/lib/printrove";
 import { readImageAsBase64 } from "@/lib/storage";
 import { logger } from "@/lib/logger";
 import type { DesignProduct } from "@prisma/client";
@@ -96,20 +96,22 @@ async function createDesignProduct(
       base64 = design.designImageData;
     }
 
+    const trimmed = await trimDesign(base64);
+
     // Upload the artwork once and persist it on Design — every other
     // category/color combo for this design reuses the same asset.
     let printroveDesignId: number;
     if (design.printroveDesignId) {
       printroveDesignId = Number(design.printroveDesignId);
     } else {
-      printroveDesignId = await uploadDesign(`${design.id}.png`, base64);
+      printroveDesignId = await uploadDesign(`${design.id}.png`, trimmed.base64);
       await prisma.design.update({
         where: { id: design.id },
         data: { printroveDesignId: String(printroveDesignId) },
       });
     }
 
-    const imageSize = await designPixelSize(base64);
+    const imageSize = { width: trimmed.width, height: trimmed.height };
     const created = await createProduct({
       name: `${design.title} — ${product.categoryLabel} preview`,
       designId: printroveDesignId,
