@@ -129,14 +129,18 @@ export default function AdminReviewModal({
               />
               {brewedPreviewImg && (
                 <div className="mt-2 flex items-center gap-2">
+                  {/* Height-only sizing (no forced square box) — the source
+                      image isn't square, and cropping it into one made a
+                      correctly-proportioned preview look distorted at a
+                      glance. Width follows the image's own aspect ratio. */}
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={brewedPreviewImg}
                     alt="What the customer sees (preview quality)"
-                    className="h-10 w-10 rounded border border-gray-200 object-contain"
+                    className="h-16 rounded border border-gray-200 bg-white"
                   />
                   <p className="text-[10px] text-gray-500">
-                    Customer sees this preview-quality version — full-res above is what prints.
+                    Customer sees this preview-quality version (same proportions, smaller/lower-res) — full-res above is what prints.
                   </p>
                 </div>
               )}

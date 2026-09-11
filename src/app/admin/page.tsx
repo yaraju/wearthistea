@@ -333,6 +333,10 @@ function QueueCard({ row, onChange }: { row: Row; onChange: () => void }) {
             />
             {previewImg && (
               <div className="absolute bottom-1 right-1 rounded border border-black/10 bg-white/90 p-0.5 shadow">
+                {/* Height-only sizing, capped width as a safety net — a
+                    forced square box pillarboxed this non-square design
+                    hard enough to read as distorted at a glance, even
+                    though object-contain never actually stretches it. */}
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={previewImg}
@@ -340,7 +344,7 @@ function QueueCard({ row, onChange }: { row: Row; onChange: () => void }) {
                   title="What the customer sees (preview quality)"
                   loading="lazy"
                   decoding="async"
-                  className="h-10 w-10 object-contain"
+                  className="h-14 max-w-14 object-contain"
                 />
               </div>
             )}
