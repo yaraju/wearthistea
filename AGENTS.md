@@ -21,8 +21,10 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - Use `npx tsx` to run TypeScript scripts in `scripts/`.
 - Use `scripts/test-fulfillment.ts` to verify design upload and product creation without placing real orders (by omitting `--order`).
 - Always verify design upload and product creation before testing order placement.
+- Before changing PrintRove placement geometry (front OR back), re-verify against the live catalog and record it in `docs/back-design-printrove-verification.md` — it's a running before/after log with the throwaway test products left on the PrintRove account for exactly this comparison. Don't delete those test products.
 
 ## Design Pipeline
 - When generating designs, always consider the garment color to ensure high contrast.
 - Designs are generated via Gemini API and mockups are created by compositing the design onto a blank tee.
 - Support for dynamic catalog selection (category, product type, color) is provided on the landing page.
+- Every design also gets a back print (cheeky payoff text + QR code), generated in the same LLM call as the front concept and rendered deterministically — see `src/lib/back-design.ts` and `docs/back-design-printrove-verification.md` for how the PrintRove back-placement wiring was verified live.
