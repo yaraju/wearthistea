@@ -59,6 +59,11 @@ export function resolveOrderStatus(
   if (order.status === "pending") return { simplified: "in_review", bucket: "active" };
 
   if (order.status === "published") {
+    // A merchant/customer-side cancellation on Printrove after we already
+    // pushed the order — this is a live signal, not one of our own DB
+    // lifecycle states, so it's checked here rather than added as another
+    // top-level `order.status` branch.
+    if (order.liveSimplified === "cancelled") return { simplified: "cancelled", bucket: "past" };
     if (order.deliveredAt) {
       return {
         simplified: "delivered",

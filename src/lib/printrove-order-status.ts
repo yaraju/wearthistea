@@ -31,6 +31,19 @@ export async function refreshLiveStatus(order: OrderWithCache): Promise<LiveStat
   if (order.deliveredAt || !order.printroveOrderId || order.status !== "published") return null;
 
   const cache = order.statusCache;
+
+  // Cancelled is also terminal (nothing further happens on Printrove's
+  // side) — once cached, stop polling instead of re-fetching forever.
+  if (cache?.statusSimplified === "cancelled") {
+    return {
+      statusSimplified: "cancelled",
+      trackingUrl: cache.trackingUrl,
+      courierName: cache.courierName,
+      trackingNumber: order.trackingNumber,
+      deliveredAt: null,
+    };
+  }
+
   const fresh =
     cache && Date.now() - cache.fetchedAt.getTime() < settings.printrove.orderStatusCacheTtlMs;
   if (fresh) {

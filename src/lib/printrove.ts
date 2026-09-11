@@ -324,10 +324,16 @@ export async function getOrderStatus(printroveOrderId: string): Promise<Printrov
   const data = await api(`/orders/${printroveOrderId}`, { method: "GET" });
   const order = (data.order ?? data.data ?? data) as Json;
 
-  const rawStatus = (order.status as string | undefined) ?? null; // field name GUESSED
-  const trackingUrl = (order.tracking_url as string | undefined) ?? null; // GUESSED — may not exist
-  const courierName =
-    (order.courier as string | undefined) ?? (order.courier_name as string | undefined) ?? null; // GUESSED
+  const rawStatus = (order.status as string | undefined) ?? null; // confirmed live: "Cancelled" seen for real
+  const trackingUrl = (order.tracking_url as string | undefined) ?? null; // confirmed live: present (null pre-dispatch)
+  // Confirmed live: `courier` is an OBJECT ({ name, id }), not a string —
+  // extracting it as a string used to throw a PrismaClientValidationError
+  // on every orderStatusCache write for every order that reached
+  // "published" (silently caught by refreshLiveStatus's try/catch, so the
+  // cache/live status never actually updated for ANY order, not just a
+  // cancelled one).
+  const courierRaw = order.courier as { name?: string } | string | null | undefined;
+  const courierName = typeof courierRaw === "string" ? courierRaw : (courierRaw?.name ?? null);
   const deliveredRaw =
     (order.delivered_at as string | undefined) ?? (order.delivery_date as string | undefined) ?? null; // GUESSED
   const deliveredAt = deliveredRaw ? new Date(deliveredRaw) : null;
