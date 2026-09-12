@@ -123,3 +123,47 @@ just a good-looking one.
 | 880006 | Men's/Black/M | End-to-end `fulfill()` path via test-fulfillment.ts | 11926376840 | 11926376841 | upper-back |
 | 880008 | Men's/Black/M | Layout comparison | 11926372553 | 11926376841 | full-panel |
 | 880009 | Men's/Black/M | Layout comparison | 11926372553 | 11926376841 | chest-height |
+
+## 2026-09-12 — back-print ink-color bug fix (not a geometry change)
+
+`renderBackDesignArtwork()` in `back-design.ts` was passing the garment
+**color name** (e.g. `"Black"`) straight through as the Satori text `color`
+style, instead of resolving it to a contrasting ink color the way the front
+art does (`isDarkGarment()` in `gemini.ts`). CSS accepts `"black"` as a
+literal color, so this silently rendered black cheeky-text and QR caption on
+a black garment — invisible, not just low-contrast. Fixed by computing
+`inkColor = isDarkGarment(opts.color || "Black") ? "#ffffff" : "#111111"`
+inside `renderBackDesignArtwork()` itself, so both existing callers
+(`design-render.ts`, `realize.ts`) get the fix for free without changing
+their call sites.
+
+**This did not touch box geometry/layout fractions** (`backBoxForLayout`,
+the 65/35, 55/45, 90/90 splits) — no re-verification against the live
+catalog (`GET /api/product/{id}`) was needed per the "How to re-verify"
+steps above. Verified instead by downloading a re-rendered back-preview PNG
+straight from the production GCS bucket and compositing it onto a black
+background locally: the payoff line and QR caption render as legible white
+text (previously would have rendered black-on-transparent, invisible once
+placed on the black garment).
+
+All 20 designs that already had back art at the time were re-rendered in
+place with the fix (deterministic Satori + QR compositing, no LLM call) and
+their `printroveBackDesignId` cleared so the next PrintRove touch re-uploads
+the corrected art instead of reusing the old, wrong-colored asset — see
+`scripts/refix-back-designs.ts`.
+
+### Unrelated same-day migration, noted here for context
+
+Separately, 152 designs (all created before the 2026-09-04 GCS migration,
+`33c5ec7`) had lost their full-res art entirely — pre-launch test/dev
+batches, no live customer orders. Regenerated in place via
+`scripts/regenerate-missing-designs.ts` (same `renderDesignArtwork()` path
+as `/api/generate/retry`), which also re-renders each design's back print
+against the fix above. For the 9 of those that already had a PrintRove
+asset or `DesignProduct` mockup, `printroveDesignId`/`printroveBackDesignId`
+and the stale `DesignProduct` rows were cleared the same way, so their next
+PrintRove touch re-uploads/rebuilds against the new art. First pass: 109/152
+succeeded, 43 hit `RESOURCE_EXHAUSTED` (Gemini prepaid credits depleted, not
+a rate limit); retried after topping up credits — all 43 succeeded on
+retry. Final state confirmed against the real bucket: 0 designs missing
+full-res art, 0 missing previews.

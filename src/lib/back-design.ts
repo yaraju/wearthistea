@@ -1,6 +1,7 @@
 import QRCode from "qrcode";
 import sharp from "sharp";
 import { renderPhraseSvg, PRINT_CANVAS_WIDTH, PRINT_CANVAS_HEIGHT } from "./text-layer";
+import { isDarkGarment } from "@/config/prompts";
 
 /**
  * A/B/C variant for how large/where the back print sits on the garment.
@@ -77,6 +78,11 @@ export async function renderBackDesignArtwork(
   const canvasWidth = opts.canvasWidth ?? PRINT_CANVAS_WIDTH;
   const canvasHeight = opts.canvasHeight ?? PRINT_CANVAS_HEIGHT;
   const box = backBoxForLayout(opts.layout, canvasWidth, canvasHeight);
+  // opts.color is the garment color name ("Black"), not a text color — passing
+  // it straight to renderPhraseSvg rendered literal black text, invisible on a
+  // black tee. Resolve it to a contrasting ink color the same way the front
+  // art does (see isDarkGarment in gemini.ts).
+  const inkColor = isDarkGarment(opts.color || "Black") ? "#ffffff" : "#111111";
 
   // 4:1 vertical split — text zone : QR zone.
   const qrZoneHeight = Math.round(box.height / 5);
@@ -85,7 +91,7 @@ export async function renderBackDesignArtwork(
   const textSvg = await renderPhraseSvg(backPhrase, {
     width: box.width,
     height: textZoneHeight,
-    color: opts.color,
+    color: inkColor,
   });
   const textPng = await sharp(Buffer.from(textSvg), { density: 300 })
     .resize(box.width, textZoneHeight, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
@@ -108,7 +114,7 @@ export async function renderBackDesignArtwork(
   const captionSvg = await renderPhraseSvg(QR_CAPTION, {
     width: box.width,
     height: captionHeight,
-    color: opts.color,
+    color: inkColor,
   });
   const captionPng = await sharp(Buffer.from(captionSvg), { density: 300 })
     .resize(box.width, captionHeight, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
