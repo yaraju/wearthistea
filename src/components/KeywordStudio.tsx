@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
-import { Sparkles, Loader2, Check, AlertTriangle, ArrowRight, RotateCcw } from "lucide-react";
+import { Sparkles, Loader2, Check, AlertTriangle, ArrowRight, ArrowDown, RotateCcw } from "lucide-react";
 import type { DesignDTO, GenerateResponse, DesignMatchDTO } from "@/lib/types";
 import { getColorCode } from "@/lib/colors";
 import { friendlyError } from "@/lib/error-messages";
@@ -311,6 +311,14 @@ export default function KeywordStudio() {
           ))}
         </div>
       )}
+
+      <p className="mt-6 flex items-center justify-center gap-2 font-mono text-xs text-ink-soft">
+        <ArrowDown
+          className="h-3.5 w-3.5 motion-safe:animate-bounce"
+          aria-hidden
+        />
+        real designs appear right here
+      </p>
 
       {/* Polite announcement for assistive tech when results are ready. */}
       <div aria-live="polite" className="visually-hidden">

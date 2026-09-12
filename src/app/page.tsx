@@ -7,7 +7,6 @@ import {
   ShieldCheck,
   Palette,
   BadgeCheck,
-  ArrowDown,
 } from "lucide-react";
 import KeywordStudio from "@/components/KeywordStudio";
 import { LEGAL, LEGAL_LINKS } from "@/components/legal";
@@ -107,14 +106,6 @@ export default function Home() {
         <div className="mx-auto mt-10 max-w-3xl">
           <KeywordStudio />
         </div>
-
-        <p className="mt-6 flex items-center justify-center gap-2 font-mono text-xs text-ink-soft">
-          <ArrowDown
-            className="h-3.5 w-3.5 motion-safe:animate-bounce"
-            aria-hidden
-          />
-          real designs appear right here
-        </p>
       </section>
 
       {/* How it works */}
