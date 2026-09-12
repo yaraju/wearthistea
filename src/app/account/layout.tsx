@@ -10,6 +10,7 @@ import Header from "@/components/Header";
 const TABS = [
   { href: "/account", label: "Delivery settings" },
   { href: "/account/orders", label: "Orders" },
+  { href: "/account/designs", label: "Your brews" },
 ];
 
 /**

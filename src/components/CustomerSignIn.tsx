@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebase-client";
 import { friendlyError } from "@/lib/error-messages";
+import { ANON_ID_HEADER, getAnonId } from "@/lib/anon-id";
 
 // Key the verify page reads back on this device to complete
 // signInWithEmailLink without re-prompting for the address — Firebase's own
@@ -31,7 +32,7 @@ export default function CustomerSignIn({ onSignedIn }: { onSignedIn: () => void 
   async function mintSession(idToken: string) {
     const res = await fetch("/api/auth/session", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", [ANON_ID_HEADER]: getAnonId() },
       body: JSON.stringify({ idToken }),
     });
     if (!res.ok) {

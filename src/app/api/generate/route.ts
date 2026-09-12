@@ -9,6 +9,10 @@ import { pickRandomBackLayout } from "@/lib/back-design";
 import { langfuse, getTraceId } from "@/lib/langfuse";
 import { logger } from "@/lib/logger";
 import { friendlyError } from "@/lib/error-messages";
+import { ANON_ID_HEADER } from "@/lib/anon-id";
+import { getCustomerSession } from "@/lib/auth";
+import { designSlug } from "@/lib/slug";
+import { embedTexts, toVectorParam } from "@/lib/embeddings";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -124,6 +128,61 @@ export async function POST(req: Request) {
     });
     createDesignSpan.end({ output: designs.map((d) => d.id) });
 
+    // Slug + semantic-search embeddings + brew attribution. Wrapped so a
+    // failure here (Gemini quota, a bad row) never blocks or fails brewing —
+    // this is enrichment, not part of the product. scripts/backfill-designs.ts
+    // catches anything left unset. Cheap and fast (a single embedding
+    // round-trip, no per-design image work), so it stays inside stage 1's
+    // multi-second budget under the ~60s Firebase Hosting proxy ceiling (see
+    // design-quality-improvement-plan.md §9) rather than moving to stage 2.
+    const enrichSpan = trace.span({ name: "enrich-design-rows" });
+    const anonId = req.headers.get(ANON_ID_HEADER);
+    const session = await getCustomerSession(req).catch(() => null);
+    const createdByUserId = session?.uid ?? null;
+    const designSlugs = new Map<string, string>();
+    try {
+      const conceptTexts = concepts.map((c) => `${c.title}\n${c.phrase}\n${c.visualConcept}`);
+      const backPhraseTexts = concepts.map((c) => c.backPhrase ?? null);
+      const [keywordVec, ...restVecs] = await embedTexts([
+        keyword,
+        ...conceptTexts,
+        ...backPhraseTexts,
+      ]);
+      const conceptVecs = restVecs.slice(0, designs.length);
+      const backPhraseVecs = restVecs.slice(designs.length);
+      const keywordVecParam = keywordVec ? toVectorParam(keywordVec) : null;
+
+      await Promise.all(
+        designs.map(async (d, i) => {
+          const slug = designSlug(d.title, d.id);
+          const conceptVecParam = conceptVecs[i] ? toVectorParam(conceptVecs[i]!) : null;
+          const backPhraseVecParam = backPhraseVecs[i] ? toVectorParam(backPhraseVecs[i]!) : null;
+          try {
+            await prisma.$executeRaw`
+              UPDATE "Design"
+              SET slug = ${slug},
+                  "createdByAnonId" = ${anonId},
+                  "createdByUserId" = ${createdByUserId},
+                  "keywordEmbedding" = ${keywordVecParam}::vector,
+                  "conceptEmbedding" = ${conceptVecParam}::vector,
+                  "backPhraseEmbedding" = ${backPhraseVecParam}::vector
+              WHERE id = ${d.id}
+            `;
+            designSlugs.set(d.id, slug);
+          } catch (err) {
+            logger.error(
+              `[Stage 1] Failed to persist slug/embeddings for design ${d.id} (non-fatal)`,
+              { traceId, designId: d.id, error: err }
+            );
+          }
+        })
+      );
+      enrichSpan.end({ output: { slugged: designSlugs.size, total: designs.length } });
+    } catch (err) {
+      enrichSpan.end({ level: "ERROR", statusMessage: String(err) });
+      logger.error("[Stage 1] Failed to embed/slug batch (non-fatal)", { traceId, error: err });
+    }
+
     trace.update({
       output: { batchId: batch.id, designCount: designs.length },
     });
@@ -137,7 +196,7 @@ export async function POST(req: Request) {
     return NextResponse.json({
       batchId: batch.id,
       keyword,
-      designs,
+      designs: designs.map((d) => ({ ...d, slug: designSlugs.get(d.id) ?? null })),
       options: getProvider().options(resolvedCategory),
     });
   } catch (err) {

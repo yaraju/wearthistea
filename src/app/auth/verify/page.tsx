@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { isSignInWithEmailLink, signInWithEmailLink } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebase-client";
 import { EMAIL_FOR_SIGN_IN_KEY } from "@/components/CustomerSignIn";
+import { ANON_ID_HEADER, getAnonId } from "@/lib/anon-id";
 
 type Status = "checking" | "needs-email" | "verifying" | "done" | "error";
 
@@ -29,7 +30,7 @@ export default function VerifyPage() {
       const idToken = await cred.user.getIdToken();
       const res = await fetch("/api/auth/session", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", [ANON_ID_HEADER]: getAnonId() },
         body: JSON.stringify({ idToken }),
       });
       if (!res.ok) {

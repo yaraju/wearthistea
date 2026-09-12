@@ -1,4 +1,5 @@
 import { settings } from "@/config/settings";
+import { slugify as slug } from "@/lib/slug";
 import type {
   FulfillInput,
   FulfillResult,
@@ -213,13 +214,6 @@ export async function createAndPublish(opts: {
   return { productId: product.id, url };
 }
 
-function slug(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "")
-    .slice(0, 50) || "wearthistea-design";
-}
 
 // ── Provider interface ───────────────────────────────────────────────────────
 // Printify is a storefront/marketplace model: it creates and publishes a

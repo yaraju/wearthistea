@@ -141,6 +141,12 @@ function AdminQueue({ onSignOut }: { onSignOut: () => void }) {
           </div>
           <div className="flex items-center gap-2">
             <Link
+              href="/admin/catalog"
+              className="inline-flex cursor-pointer items-center gap-2 rounded-full border-2 border-paper px-4 py-2 font-mono text-xs uppercase tracking-wider transition-colors duration-200 hover:bg-paper hover:text-ink"
+            >
+              Catalog
+            </Link>
+            <Link
               href="/admin/rate-limits"
               className="inline-flex cursor-pointer items-center gap-2 rounded-full border-2 border-paper px-4 py-2 font-mono text-xs uppercase tracking-wider transition-colors duration-200 hover:bg-paper hover:text-ink"
             >

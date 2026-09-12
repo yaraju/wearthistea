@@ -99,6 +99,40 @@ model Design {
   // re-uploads instead of reusing stale art.
   printroveBackDesignId String?
 
+  // Shareable identity: slugify(title) + "-" + id, set once the design row
+  // has an id (see /api/generate and scripts/backfill-designs.ts). Nullable
+  // only for pre-migration rows awaiting backfill — every design created
+  // going forward gets one immediately. @unique is safe with no collision
+  // handling because the id suffix already guarantees uniqueness.
+  slug String? @unique
+
+  // Who brewed this design (for a future "your brews" account page).
+  // createdByAnonId is set on every brew from the anon-id header the client
+  // already sends (see ANON_ID_HEADER); createdByUserId is set immediately
+  // when the brewer already has a session, and backfilled onto matching
+  // createdByAnonId rows when that anon browser later signs in (see
+  // /api/auth/session). Neither is required to brew.
+  createdByUserId String?
+  createdByUser   User?   @relation("DesignsBrewed", fields: [createdByUserId], references: [id])
+  createdByAnonId String?
+
+  // Semantic-search embeddings (Gemini text-embedding-004, 768-dim, cosine
+  // similarity via pgvector's <=> operator) over the three text axes the
+  // catalog/pre-brewed matching search on: the raw brew keyword (denormalized
+  // down from Batch.keyword so a search never needs to join Batch), the
+  // concept (title + phrase + visualConcept), and the back phrase (nullable,
+  // same as backPhrase itself). Unsupported() because Prisma has no native
+  // vector type — this EXCLUDES these three columns from the generated
+  // Prisma Client entirely, so every existing prisma.design.* call keeps
+  // compiling unchanged. All reads/writes of these columns go through
+  // $queryRaw/$executeRaw only — see src/lib/embeddings.ts and
+  // src/lib/design-search.ts. The pgvector extension and the HNSW indexes on
+  // these columns are created out-of-band by scripts/setup-pgvector-*.ts,
+  // never by `prisma db push`.
+  keywordEmbedding    Unsupported("vector(768)")?
+  conceptEmbedding    Unsupported("vector(768)")?
+  backPhraseEmbedding Unsupported("vector(768)")?
+
   orders         Order[]
   designProducts DesignProduct[]
 
@@ -107,6 +141,8 @@ model Design {
 
   @@index([status])
   @@index([batchId])
+  @@index([createdByUserId])
+  @@index([createdByAnonId])
 }
 
 // One real Printrove Product Library entry + mockup for a (design, category,
@@ -303,8 +339,9 @@ model User {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  orders    Order[]
-  addresses Address[]
+  orders        Order[]
+  addresses     Address[]
+  brewedDesigns Design[] @relation("DesignsBrewed")
 }
 
 // A saved shipping address on a signed-in customer's account. Orders never

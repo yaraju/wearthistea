@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createSessionCookie, verifyIdToken, ensureUserRecord, SESSION_COOKIE, SESSION_MAX_AGE_MS } from "@/lib/auth";
+import { ANON_ID_HEADER } from "@/lib/anon-id";
+import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
 
@@ -29,6 +31,23 @@ export async function POST(req: Request) {
     const decoded = await verifyIdToken(idToken);
     const sessionCookie = await createSessionCookie(idToken);
     await ensureUserRecord(decoded);
+
+    // Claim any designs brewed anonymously in this same browser before
+    // sign-in (see createdByAnonId on Design, set from this same header by
+    // /api/generate) — without this, "your brews" would rarely populate,
+    // since brewing is unauthenticated and sign-in typically happens later,
+    // at checkout.
+    const anonId = req.headers.get(ANON_ID_HEADER);
+    if (anonId) {
+      await prisma.design
+        .updateMany({
+          where: { createdByAnonId: anonId, createdByUserId: null },
+          data: { createdByUserId: decoded.uid },
+        })
+        .catch((err) => {
+          console.error("[auth/session] anon-id design backfill failed:", err);
+        });
+    }
 
     const res = NextResponse.json({ ok: true });
     res.cookies.set(SESSION_COOKIE, sessionCookie, {

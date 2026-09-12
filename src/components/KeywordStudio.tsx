@@ -3,12 +3,13 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { Sparkles, Loader2, Check, AlertTriangle, ArrowRight, RotateCcw } from "lucide-react";
-import type { DesignDTO, GenerateResponse } from "@/lib/types";
+import type { DesignDTO, GenerateResponse, DesignMatchDTO } from "@/lib/types";
 import { getColorCode } from "@/lib/colors";
 import { friendlyError } from "@/lib/error-messages";
 import { track } from "@/lib/analytics";
 import { getAnonId, ANON_ID_HEADER } from "@/lib/anon-id";
 import PickDesignModal from "@/components/PickDesignModal";
+import ReviewBadge from "@/components/ReviewBadge";
 
 const SKELETON_COUNT = 5; // matches default settings.optionsPerKeyword
 
@@ -54,6 +55,10 @@ export default function KeywordStudio() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<GenerateResponse | null>(null);
+  // Fallback for impatient users, never a competing first choice — see the
+  // "done" render below, where this always renders BELOW the fresh-brew
+  // grid, never above it, even while fresh brews are still rendering.
+  const [preBrewed, setPreBrewed] = useState<DesignMatchDTO[]>([]);
   // Apparel type is no longer a brew-time choice (see the plan doc — one
   // design now generates once and gets a Printrove preview product per
   // category, picked at "select this design" time instead). Color stays
@@ -92,7 +97,21 @@ export default function KeywordStudio() {
     setPhase("loading");
     setError(null);
     setResult(null);
+    setPreBrewed([]);
     track("brew_started", { keyword: tea });
+
+    // Fired in parallel, never awaited before the fresh-brew request below —
+    // a slow or failed match lookup must never delay or block brewing, which
+    // is the actual product. Resolves independently and renders below the
+    // fresh-brew grid whenever it's ready.
+    fetch("/api/designs/prebrewed", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ keyword: tea }),
+    })
+      .then((res) => (res.ok ? res.json() : { matches: [] }))
+      .then((data: { matches: DesignMatchDTO[] }) => setPreBrewed(data.matches ?? []))
+      .catch((err) => console.error("Failed to fetch pre-brewed matches", err));
 
     try {
       const res = await fetch("/api/generate", {
@@ -163,8 +182,13 @@ export default function KeywordStudio() {
         if (!prev) return null;
         return {
           ...prev,
-          designs: prev.designs.map(d => 
-            d.id === designId ? updatedDesign : d
+          // Spread onto the existing card rather than replacing it outright —
+          // /api/generate/retry's response doesn't carry `slug` (it's set
+          // once at creation in /api/generate and excluded from Prisma's
+          // return shape as an Unsupported column), so a full replace would
+          // silently drop the link this card already has.
+          designs: prev.designs.map(d =>
+            d.id === designId ? { ...d, ...updatedDesign } : d
           )
         };
       });
@@ -350,6 +374,27 @@ export default function KeywordStudio() {
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* Fallback for impatient users — always rendered below the fresh
+            grid above (loading or done), never as a competing first choice.
+            Appears once/if matches resolve; nothing shown otherwise. */}
+        {preBrewed.length > 0 && (
+          <div className="mt-10">
+            <div className="mb-5 flex items-end justify-between gap-4">
+              <h2 className="headline text-xl sm:text-2xl">
+                In a hurry? Someone’s already brewed something close
+              </h2>
+              <span className="kicker hidden text-ink-soft sm:block">
+                {preBrewed.length} matches
+              </span>
+            </div>
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+              {preBrewed.map((m, i) => (
+                <PreBrewedCard key={m.id} match={m} index={i} reduce={reduce} selectedColor={selectedColor} />
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -520,6 +565,99 @@ function DesignCard({
             setOpen(false);
           }}
         />
+      )}
+    </motion.figure>
+  );
+}
+
+function PreBrewedCard({
+  match,
+  index,
+  reduce,
+  selectedColor,
+}: {
+  match: DesignMatchDTO;
+  index: number;
+  reduce: boolean | null;
+  selectedColor: string;
+}) {
+  const [design, setDesign] = useState<DesignDTO | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const img = match.designPreviewImagePath || match.productPreviewImagePath;
+
+  // /api/designs/prebrewed returns a lean match DTO, not a full DesignDTO —
+  // fetch the full record (needed by PickDesignModal) only once the visitor
+  // actually wants to pick it, rather than eagerly for every match shown.
+  async function pickThisOne() {
+    if (!match.slug && !match.id) return;
+    setLoading(true);
+    setErr(null);
+    try {
+      const res = await fetch(`/api/designs/${match.slug || match.id}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Could not load this design.");
+      track("select_design", { designId: match.id, prebrewed: true });
+      setDesign(data.design as DesignDTO);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not load this design.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <motion.figure
+      initial={reduce ? false : { opacity: 0, y: 14 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: reduce ? 0 : index * 0.06, duration: 0.35 }}
+      className="sticker group flex flex-col overflow-hidden rounded-2xl bg-paper-2"
+    >
+      <div
+        className="relative flex aspect-[4/5] items-center justify-center overflow-hidden p-5"
+        style={{ backgroundColor: getColorCode(match.variantColor || selectedColor) }}
+      >
+        {img ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={img}
+            alt={`${match.title} — design art reading “${match.phrase}”`}
+            loading="lazy"
+            decoding="async"
+            className="max-h-full max-w-full object-contain"
+          />
+        ) : null}
+        <span className="absolute left-3 top-3">
+          <ReviewBadge status={match.reviewBadge} />
+        </span>
+      </div>
+
+      <figcaption className="flex flex-1 flex-col p-4">
+        <h3 className="font-display text-xl font-bold leading-tight">{match.title}</h3>
+        <p className="mt-1 text-sm text-ink-soft">“{match.phrase}”</p>
+        {match.blurb && <p className="mt-2 line-clamp-2 text-xs text-ink-soft/80">{match.blurb}</p>}
+
+        <div className="mt-4 flex-1" />
+
+        {err && <p className="mb-2 font-mono text-xs text-pink-ink">{friendlyError(err)}</p>}
+        <button
+          onClick={pickThisOne}
+          disabled={loading}
+          className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-ink bg-highlight px-4 py-2.5 font-mono text-xs font-bold uppercase tracking-wider text-ink transition-transform duration-200 hover:-translate-y-0.5 disabled:opacity-50"
+        >
+          {loading ? (
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+          ) : (
+            <>
+              Pick this one <ArrowRight className="h-4 w-4" aria-hidden />
+            </>
+          )}
+        </button>
+      </figcaption>
+
+      {design && (
+        <PickDesignModal design={design} onClose={() => setDesign(null)} onPlaced={() => setDesign(null)} />
       )}
     </motion.figure>
   );

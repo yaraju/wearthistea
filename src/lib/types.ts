@@ -18,6 +18,11 @@ export interface AddressDTO {
 // generation content — order/purchase details live on OrderDTO instead.
 export interface DesignDTO {
   id: string;
+  // Shareable /design/[slug] identity — set once at creation in
+  // /api/generate (a raw-SQL write, since it's an Unsupported-adjacent
+  // write path — see embeddings.ts). Null only for pre-migration rows
+  // awaiting scripts/backfill-designs.ts, or if that write failed.
+  slug?: string | null;
   batchId: string;
   title: string;
   phrase: string;
@@ -142,6 +147,24 @@ export interface CatalogCategoryOption {
 export interface CatalogResponse {
   categories: CatalogCategoryOption[];
   colors: string[];
+}
+
+// One semantic-search match — pre-brewed matches on the brew page, and
+// "similar designs" on the account page. reviewBadge tells the customer
+// whether this design's best combo has cleared admin review yet; it's
+// informational only, never a purchase gate (DesignProduct.approvalStatus
+// already gates fulfillment — see design-product-review.ts).
+export interface DesignMatchDTO {
+  id: string;
+  slug: string | null;
+  title: string;
+  phrase: string;
+  blurb: string | null;
+  productPreviewImagePath: string;
+  designPreviewImagePath: string;
+  variantColor: string | null;
+  distance: number;
+  reviewBadge: "taste-tested" | "pending-taste-test";
 }
 
 // One (design, category) preview — the real Printrove mockup shown in the
