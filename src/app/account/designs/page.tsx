@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Loader2, Sparkles } from "lucide-react";
 import type { DesignMatchDTO } from "@/lib/types";
 import ReviewBadge from "@/components/ReviewBadge";
+import { getColorCode } from "@/lib/colors";
 
 interface AccountDesign {
   id: string;
@@ -14,6 +15,7 @@ interface AccountDesign {
   status: string;
   productPreviewImagePath: string;
   designPreviewImagePath: string;
+  variantColor: string | null;
   createdAt: string;
 }
 
@@ -114,9 +116,10 @@ function BrewCard({ design }: { design: AccountDesign }) {
     <div className="sticker flex flex-col overflow-hidden rounded-2xl bg-paper-2">
       <Link
         href={shareable ? `/design/${design.slug}` : "#"}
-        className={`relative flex aspect-[4/5] items-center justify-center overflow-hidden bg-paper p-5 ${
+        className={`relative flex aspect-[4/5] items-center justify-center overflow-hidden p-5 ${
           shareable ? "" : "pointer-events-none"
         }`}
+        style={{ backgroundColor: getColorCode(design.variantColor || "Black") }}
       >
         {img ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -153,7 +156,8 @@ function BrewCard({ design }: { design: AccountDesign }) {
               <img
                 src={m.designPreviewImagePath || m.productPreviewImagePath}
                 alt={m.title}
-                className="aspect-square w-full rounded-lg object-contain bg-paper"
+                className="aspect-square w-full rounded-lg object-contain"
+                style={{ backgroundColor: getColorCode(m.variantColor || "Black") }}
               />
               <span className="absolute bottom-1 left-1">
                 <ReviewBadge status={m.reviewBadge} />

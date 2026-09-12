@@ -29,6 +29,7 @@ export async function GET(req: Request) {
       status: true,
       productPreviewImagePath: true,
       designPreviewImagePath: true,
+      variantColor: true,
       createdAt: true,
     },
   });

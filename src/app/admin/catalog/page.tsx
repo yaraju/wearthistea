@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Loader2, Search } from "lucide-react";
 import { printroveProduct } from "@/config/settings";
+import { getColorCode } from "@/lib/colors";
 import AdminLogin from "@/components/AdminLogin";
 import AdminReviewModal from "@/components/AdminReviewModal";
 
@@ -201,7 +202,10 @@ function Catalog() {
                     onClick={() => setOpen(d)}
                     className="flex flex-col overflow-hidden rounded-lg border border-gray-200 bg-white text-left transition-shadow hover:shadow-md"
                   >
-                    <div className="flex aspect-square items-center justify-center bg-gray-50 p-3">
+                    <div
+                      className="flex aspect-square items-center justify-center p-3"
+                      style={{ backgroundColor: getColorCode(d.variantColor || "Black") }}
+                    >
                       {img ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img src={img} alt={d.title} className="max-h-full max-w-full object-contain" />
