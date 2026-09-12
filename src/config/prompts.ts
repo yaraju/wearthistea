@@ -258,21 +258,26 @@ JSON format:
   /** ── 2. CLEAN PRINT-READY ARTWORK — image model ─────────────────────────── */
   designImage: (c: Concept) =>
     `
-Create a high-resolution, print-ready ${c.productType || "T-shirt"} GRAPHIC ONLY.
+Create a single isolated PRINT GRAPHIC — the ink artwork ITSELF, floating alone
+on a transparent background. This is NOT a picture of a shirt, NOT a mockup,
+NOT a product photo — it is only the illustration and lettering that will
+later be printed onto the chest of a ${c.color || "Black"} ${c.productType || "T-shirt"} (${c.category || "Clothing"}) by a separate process.
 
-This graphic will be printed on a ${c.color || "Black"} ${c.productType || "T-shirt"} (${c.category || "Clothing"}).
+CRITICAL — READ THIS TWICE: the image must contain ONLY the illustration and
+text described below, nothing else. It must NOT contain any part of a
+garment anywhere in the frame — no shirt, no sleeves, no collar, no
+neckline, no shoulders, no fabric texture, weave, or wrinkles, no body, no
+mannequin, no hanger, no hood. This applies even as a subtle background
+shape, a framing device, a badge/crest outline, or a silhouette behind the
+main graphic — if the pixels trace anything resembling a t-shirt's outline
+at all, that is wrong and must not happen. Also no model, wall, studio,
+paper, sticker, shadow, floor, or background scene of any kind. Crop tight
+to the illustration and text only, isolated on transparent alpha.
 
 ${isDarkGarment(c.color || "Black")
   ? "IMPORTANT: The t-shirt color is DARK. Use bright, high-contrast colors (white, neons, pastels) so the design is visible."
   : "IMPORTANT: The t-shirt color is LIGHT. Use dark, high-contrast colors (black, deep blues, rich reds) so the design is visible."
 }
-
-This is the final transparent artwork to upload to Printify — it is the print
-file itself, not a photo or drawing OF a printed product.
-Do NOT show a t-shirt, model, hanger, wall, studio, paper, sticker, mockup,
-shadow, floor, background scene, or product photo. Do not draw a garment
-outline or collar around the design — the graphic will be placed onto the
-real garment separately. Crop tight to the illustration and text only.
 
 ${PRINT_SPECS}
 
@@ -305,6 +310,10 @@ COMPOSITION:
 Centered chest-print layout. Balanced text and illustration. Leave safe margin
 around all edges. The design should feel like premium internet-era streetwear,
 not clipart, not a poster, not a meme screenshot.
+The illustration's own outer silhouette must NOT read as a t-shirt, garment,
+or clothing shape — build the composition's silhouette from the subject
+itself (a badge, a circle, a rectangle, a character, a burst — whatever suits
+the concept), never from a shirt outline.
 
 ${c.backPhrase ? `CONTEXT ONLY — do not draw this: the BACK of this shirt separately carries the line ${q(c.backPhrase)} as plain typeset text (rendered by a deterministic process, not by you). Do not render, reference, or duplicate this text on the front — just keep the front art thematically consistent with it rather than contradicting it.` : ""}
 
@@ -318,9 +327,21 @@ ${ART_RULES}
    */
   designImageArtOnly: (c: Concept) =>
     `
-Create a high-resolution, print-ready t-shirt ILLUSTRATION ONLY.
+Create a single isolated PRINT ILLUSTRATION — the ink artwork ITSELF, floating
+alone on a transparent background. This is NOT a picture of a shirt, NOT a
+mockup, NOT a product photo — it is only the scene described below, ready to
+be printed onto the chest of a ${c.color || "Black"} ${c.productType || "T-shirt"} by a separate process.
 
-This illustration will be printed on a ${c.color || "Black"} ${c.productType || "T-shirt"}.
+CRITICAL — READ THIS TWICE: the image must contain ONLY the illustration
+described below, nothing else. It must NOT contain any part of a garment
+anywhere in the frame — no shirt, no sleeves, no collar, no neckline, no
+shoulders, no fabric texture, weave, or wrinkles, no body, no mannequin, no
+hanger, no hood. This applies even as a subtle background shape, a framing
+device, a badge/crest outline, or a silhouette behind the main graphic — if
+the pixels trace anything resembling a t-shirt's outline at all, that is
+wrong and must not happen. Also no model, wall, studio, paper, sticker,
+shadow, floor, or background scene of any kind. Crop tight to the
+illustration only, isolated on transparent alpha.
 
 ${isDarkGarment(c.color || "Black")
   ? "IMPORTANT: The t-shirt color is DARK. Use bright, high-contrast colors (white, neons, pastels) so the illustration is visible."
@@ -336,12 +357,6 @@ stylized, not even partially. A separate deterministic process (not you)
 renders the exact phrase as a real typeface afterward and composites it into
 the empty band described below. If you include any lettering here, it will
 visually collide with that separately-rendered text. Draw the scene only.
-
-This is the final transparent artwork to upload to Printify — it is the print
-file itself, not a photo or drawing OF a printed product. Do NOT show a
-t-shirt, model, hanger, wall, studio, paper, sticker, mockup, shadow, floor,
-background scene, or product photo. Do not draw a garment outline or collar
-around the illustration.
 
 The phrase this illustration is thematically about (for context only — DO
 NOT draw these words or any words):
@@ -370,6 +385,8 @@ phrase text will be placed into that empty bottom band afterward — by a
 separate process, not by you. Leave a small safe margin around the
 illustration within its 74% region too. Reminder: no text/lettering
 anywhere in the illustration itself, including inside the top 74% region.
+Reminder: the illustration's own outer silhouette must NOT read as a
+t-shirt, garment, or clothing shape.
 
 ${c.backPhrase ? `CONTEXT ONLY — do not draw this: the BACK of this shirt separately carries the line ${q(c.backPhrase)} as plain typeset text (rendered by a deterministic process, not by you). Do not render, reference, or duplicate this text on the front — just keep the front art thematically consistent with it rather than contradicting it.` : ""}
 
