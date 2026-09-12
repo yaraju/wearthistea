@@ -49,6 +49,7 @@ async function main() {
     tier: "admin" as const,
     bucketKey: "ratelimit:generate:script:regenerate-missing",
     windowMs: 60 * 60 * 1000,
+    limit: Number.MAX_SAFE_INTEGER,
   };
 
   let succeeded = 0;

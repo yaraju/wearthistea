@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { Sparkles, Loader2, Check, AlertTriangle, ArrowRight, ArrowDown, RotateCcw } from "lucide-react";
 import type { DesignDTO, GenerateResponse, DesignMatchDTO } from "@/lib/types";
@@ -31,23 +31,145 @@ async function parseJsonResponse(res: Response): Promise<any> {
   return res.json();
 }
 
-/** Run `worker` over `items`, at most `concurrency` at a time. Used to spread
- * per-design render requests out instead of firing them all at once — they
- * all land on the same backend container, and full concurrency pushes each
- * request's latency close to the hosting proxy's timeout (see spill()). */
-async function runWithConcurrency<T>(
-  items: T[],
-  concurrency: number,
-  worker: (item: T) => Promise<void>
-): Promise<void> {
-  let next = 0;
-  async function run(): Promise<void> {
-    const i = next++;
-    if (i >= items.length) return;
-    await worker(items[i]);
-    return run();
+// Rendering happens server-side now (dispatched from /api/generate — see its
+// doc comment), so the client's only job here is to poll until every design
+// in the batch reaches a terminal status.
+const POLL_INTERVAL_MS = 2000;
+// Give up refreshing after this long — matches roughly the outer bound of
+// the design-render queue's own retry window (deploy.yml) plus slack. A
+// design still "generating" past this either succeeded and we just missed
+// the last tick, or genuinely needs the card's own "Retry Render" path; we
+// don't spin forever on a tab left open indefinitely.
+const POLL_TIMEOUT_MS = 10 * 60 * 1000;
+
+// Remembers the most recent brew across a closed/reopened tab — see
+// restoreLastBrew() below. Deliberately localStorage, not a cookie: this
+// app's Firebase Hosting rewrite only forwards a cookie literally named
+// "__session" through to Cloud Run (see anon-id.ts), so any other cookie
+// name would silently never round-trip in production.
+const LAST_BREW_STORAGE_KEY = "wtt:lastBrew";
+
+function saveLastBrew(keyword: string, batchId: string) {
+  try {
+    localStorage.setItem(LAST_BREW_STORAGE_KEY, JSON.stringify({ keyword, batchId }));
+  } catch {
+    // localStorage can throw (private browsing, quota, disabled storage) —
+    // losing this is a pure convenience regression, never worth failing the
+    // brew itself over.
   }
-  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, run));
+}
+
+function loadLastBrew(): { keyword: string; batchId: string } | null {
+  try {
+    const raw = localStorage.getItem(LAST_BREW_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (typeof parsed?.batchId === "string" && typeof parsed?.keyword === "string") {
+      return { keyword: parsed.keyword, batchId: parsed.batchId };
+    }
+  } catch {
+    // ignore — malformed/corrupted value, treat as nothing saved
+  }
+  return null;
+}
+
+// Rotating captions for a "generating" card — the render already happened
+// (or is happening) server-side; this is purely a "we're watching it get
+// made" feeling, in the brand's chronically-online voice.
+const GENERATING_VERBS = [
+  "Steeping the tea",
+  "Overthinking the font",
+  "Consulting the group chat",
+  "Arguing with the muse",
+  "Committing to the bit",
+  "Ironing out the pixels",
+  "Summoning main character energy",
+  "Vibe-checking the palette",
+  "Negotiating with the ink",
+  "Rehearsing the read",
+  "Doubting every color choice",
+  "Manifesting drip",
+  "Untangling the drama",
+  "Spilling a little more tea",
+  "Photosynthesizing",
+  "Rewriting the punchline",
+  "Googling how shirts work",
+  "Bribing the pixels to behave",
+  "Practicing the smirk",
+  "Cross-referencing the chat",
+  "Channeling unhinged creativity",
+  "Aligning the kerning",
+  "Pretending this is easy",
+  "Consulting a Magic 8-Ball",
+  "Powering the printer with spite",
+  "Fact-checking the tea",
+  "Buffering main character energy",
+  "Asking the intern (no intern)",
+  "Workshopping the smirk",
+  "Overanalyzing the vibe",
+];
+
+/** Cheap deterministic hash so each card starts on a different verb instead
+ * of all five reading the exact same line at once. */
+function hashSeed(seed: string): number {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+
+/** Placeholder shown in a card's art box while its design is "generating":
+ * a soft blurred blob (brand colors, no image asset) that gradually
+ * sharpens over 60 real seconds — timed from this component's own mount via
+ * framer-motion's animate prop, which keeps running regardless of parent
+ * re-renders (every poll tick) as long as this instance stays mounted — plus
+ * a rotating snarky caption. Purely illusory: the art is already done or
+ * getting done server-side either way, this is just something nicer to
+ * watch than a bare spinner. */
+function GeneratingPlaceholder({ seed, reduce }: { seed: string; reduce: boolean | null }) {
+  const [verbIndex, setVerbIndex] = useState(() => hashSeed(seed) % GENERATING_VERBS.length);
+
+  useEffect(() => {
+    if (reduce) return;
+    const id = setInterval(() => {
+      setVerbIndex((i) => (i + 1) % GENERATING_VERBS.length);
+    }, 2200);
+    return () => clearInterval(id);
+  }, [reduce]);
+
+  return (
+    <div className="relative flex h-full w-full items-center justify-center overflow-hidden">
+      <motion.div
+        initial={reduce ? { filter: "blur(4px)" } : { filter: "blur(28px)" }}
+        animate={{ filter: "blur(3px)" }}
+        transition={reduce ? { duration: 0 } : { duration: 60, ease: [0.22, 1, 0.36, 1] }}
+        className="absolute inset-6 rounded-[42%_58%_53%_47%/48%_42%_58%_52%]"
+        style={{
+          background:
+            "radial-gradient(circle at 32% 28%, var(--color-highlight), var(--color-pink) 55%, var(--color-tea-bright) 100%)",
+        }}
+        aria-hidden
+      />
+      <div className="relative z-10 mx-4 grid max-w-[calc(100%-2rem)] rounded-full bg-ink/75 px-3 py-1.5 backdrop-blur-sm">
+        {/* Default (sync) mode, not "wait" — the incoming line fades in
+            while the outgoing one fades out. With "wait" the gap between
+            them is brief but every card in the grid mounts at nearly the
+            same instant, so their gaps land in sync too: the whole row of
+            captions would blink blank together every ~2.2s. */}
+        <AnimatePresence>
+          <motion.span
+            key={verbIndex}
+            initial={reduce ? false : { opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={reduce ? undefined : { opacity: 0, y: -4 }}
+            transition={{ duration: 0.25 }}
+            className="col-start-1 row-start-1 block min-w-0 truncate font-mono text-[11px] font-bold uppercase tracking-wider text-paper"
+          >
+            {GENERATING_VERBS[verbIndex]}…
+          </motion.span>
+        </AnimatePresence>
+      </div>
+    </div>
+  );
 }
 
 export default function KeywordStudio() {
@@ -68,6 +190,57 @@ export default function KeywordStudio() {
   const [style, setStyle] = useState<"raster" | "svg">("raster");
   const [examples, setExamples] = useState<string[]>([]);
   const reduce = useReducedMotion();
+  const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollDeadline = useRef(0);
+
+  function stopPolling() {
+    if (pollTimer.current) {
+      clearInterval(pollTimer.current);
+      pollTimer.current = null;
+    }
+  }
+
+  // Rendering happens server-side (see /api/generate's doc comment) — this
+  // just refreshes each card from the latest DB state until every design in
+  // the batch lands on a terminal status.
+  async function pollBatchStatus(batchId: string) {
+    try {
+      const res = await fetch(`/api/generate/status?batchId=${encodeURIComponent(batchId)}`);
+      if (!res.ok) return;
+      const data = (await res.json()) as GenerateResponse;
+      setResult((prev) => {
+        if (!prev || prev.batchId !== batchId) return prev;
+        return {
+          ...prev,
+          designs: prev.designs.map((d) => {
+            const updated = data.designs.find((nd) => nd.id === d.id);
+            // Preserve fields the status endpoint doesn't carry (e.g. slug,
+            // set once at creation) by spreading onto the existing card
+            // rather than replacing it outright.
+            return updated ? { ...d, ...updated } : d;
+          }),
+        };
+      });
+      const stillGenerating = data.designs.some((d) => d.status === "generating");
+      if (!stillGenerating) stopPolling();
+    } catch (err) {
+      console.error("Failed to poll batch status", err);
+    }
+  }
+
+  function startPolling(batchId: string) {
+    stopPolling();
+    pollDeadline.current = Date.now() + POLL_TIMEOUT_MS;
+    pollTimer.current = setInterval(() => {
+      if (Date.now() > pollDeadline.current) {
+        stopPolling();
+        return;
+      }
+      pollBatchStatus(batchId);
+    }, POLL_INTERVAL_MS);
+  }
+
+  useEffect(() => stopPolling, []);
 
   useEffect(() => {
     fetch("/api/catalog")
@@ -90,10 +263,37 @@ export default function KeywordStudio() {
       .catch(err => console.error("Failed to fetch gossip examples", err));
   }, []);
 
+  // Restore whatever brew was still in flight (or just finished) the last
+  // time this browser had the studio open — so closing the tab mid-brew
+  // doesn't read as having lost it. Runs once on mount; a batch that's since
+  // been deleted or never existed just 404s and we leave the studio empty.
+  useEffect(() => {
+    const saved = loadLastBrew();
+    if (!saved) return;
+    (async () => {
+      try {
+        const res = await fetch(`/api/generate/status?batchId=${encodeURIComponent(saved.batchId)}`);
+        if (!res.ok) return;
+        const data = (await res.json()) as GenerateResponse;
+        setKeyword(saved.keyword);
+        setResult(data);
+        setPhase("done");
+        if (data.designs.some((d) => d.status === "generating")) {
+          startPolling(saved.batchId);
+        }
+      } catch (err) {
+        console.error("Failed to restore last brew", err);
+      }
+    })();
+    // Intentionally run once on mount only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function spill(seed?: string) {
     const tea = (seed ?? keyword).trim();
     if (tea.length < 2) return;
     if (seed) setKeyword(seed);
+    stopPolling();
     setPhase("loading");
     setError(null);
     setResult(null);
@@ -129,26 +329,20 @@ export default function KeywordStudio() {
       });
       const data = await parseJsonResponse(res);
       if (!res.ok) throw new Error(data.error ?? "Something went wrong.");
-      setResult(data as GenerateResponse);
+      const generated = data as GenerateResponse;
+      setResult(generated);
       setPhase("done");
       track("generate_designs", {
         keyword: tea,
-        backLayouts: (data as GenerateResponse).designs.map((d) => d.backLayout).join(","),
+        backLayouts: generated.designs.map((d) => d.backLayout).join(","),
       });
-      // Concepts come back fast; each design's artwork is rendered by its own
-      // request so no single request has to finish the whole batch inside
-      // the hosting proxy's timeout. Each card flips from "generating" to
-      // done/failed independently as its request completes. Capped at 2
-      // in-flight renders — 5 at once all land on the same Cloud Run
-      // container (concurrency isn't scaled per-request) and contend hard
-      // enough for CPU that individual renders stretch from ~30s to ~55-58s,
-      // eating almost all of the ~60s proxy budget. See the production
-      // incident note in design-quality-improvement-plan.md.
-      runWithConcurrency(
-        (data as GenerateResponse).designs.map((d) => d.id),
-        2,
-        retryDesign
-      );
+      // Concepts come back fast; artwork rendering was already dispatched
+      // server-side by /api/generate itself (see its doc comment) — it
+      // keeps going whether or not this tab stays open. Persist the batch so
+      // reopening the tab later restores it (see the mount effect above),
+      // then poll until every card lands on a terminal status.
+      saveLastBrew(tea, generated.batchId);
+      startPolling(generated.batchId);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Generation failed.";
       track("brew_failed", { keyword: tea, reason: message });
@@ -480,26 +674,41 @@ function DesignCard({
         className="relative flex aspect-[4/5] items-center justify-center overflow-hidden p-5"
         style={{ backgroundColor: getColorCode(selectedColor) }}
       >
-        {img ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={img}
-            alt={`${design.title} — design art reading “${design.phrase}”`}
-            loading="lazy"
-            decoding="async"
-            className="max-h-full max-w-full object-contain"
-          />
-        ) : generating ? (
-          <div className="flex h-full items-center justify-center p-6 text-center">
-            <Loader2 className="h-5 w-5 animate-spin text-ink-soft" aria-hidden />
-          </div>
-        ) : (
-          <div className="flex h-full items-center justify-center p-6 text-center">
-            <span className="font-mono text-xs text-ink-soft">
-              artwork didn’t render
-            </span>
-          </div>
-        )}
+        <AnimatePresence mode="sync">
+          {img ? (
+            <motion.img
+              key="art"
+              initial={reduce ? false : { opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.3 }}
+              src={img}
+              alt={`${design.title} — design art reading “${design.phrase}”`}
+              loading="lazy"
+              decoding="async"
+              className="max-h-full max-w-full object-contain"
+            />
+          ) : generating ? (
+            <motion.div
+              key="generating"
+              exit={reduce ? undefined : { opacity: 0 }}
+              transition={{ duration: 0.3 }}
+              className="absolute inset-0"
+            >
+              <GeneratingPlaceholder seed={design.id} reduce={reduce} />
+            </motion.div>
+          ) : (
+            <motion.div
+              key="failed-art"
+              initial={reduce ? false : { opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="flex h-full items-center justify-center p-6 text-center"
+            >
+              <span className="font-mono text-xs text-ink-soft">
+                artwork didn’t render
+              </span>
+            </motion.div>
+          )}
+        </AnimatePresence>
         {design.vibe && (
           <span className="absolute left-3 top-3 max-w-[calc(100%-1.5rem)] truncate rounded-full bg-ink px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-paper">
             {design.vibe}

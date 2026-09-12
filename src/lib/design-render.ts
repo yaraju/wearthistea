@@ -6,6 +6,8 @@ import { renderBackDesignArtwork, type BackLayout } from "@/lib/back-design";
 import { saveImageWithPreview, hasDurableStorage } from "@/lib/storage";
 import { settings } from "@/config/settings";
 import { recordGenerateUsage, type RateLimitResult } from "@/lib/rate-limit";
+import { enqueuePrintroveProducts } from "@/lib/tasks";
+import { logger } from "@/lib/logger";
 import type { Design } from "@prisma/client";
 import type { LangfuseTraceClient } from "langfuse";
 
@@ -118,4 +120,72 @@ export async function renderDesignArtwork(
       errorMessage: null,
     },
   });
+}
+
+export type FinalizeDesignRenderResult =
+  | { ok: true; design: Design }
+  | { ok: false; error: string; transient: boolean };
+
+/**
+ * renderDesignArtwork() + the two things every caller wraps it in: queueing
+ * the Printrove preview-product build once art lands, and persisting a
+ * "failed" status/errorMessage on error. Extracted from /api/generate/retry
+ * (its original home) so /api/tasks/render-design — the server-side dispatch
+ * a Cloud Task fires, with no end-user request/response to shape errors
+ * around — can share the exact same behavior instead of re-implementing it.
+ *
+ * Always marks the design "failed" on error, even a transient provider one
+ * (matches /api/generate/retry's existing behavior: a design left at
+ * "generating" forever would look stuck, not failed, on reload — and the
+ * card's own "Retry Render" button is the fallback if nothing else recovers
+ * it). `transient` is still returned so a Cloud-Tasks-backed caller can
+ * answer with a 5xx and let the queue's own redelivery retry in the
+ * background per its retry-config — if that redelivery succeeds, it just
+ * overwrites this row back to "generated", so marking it failed now doesn't
+ * block that.
+ *
+ * Never throws: callers get a tagged result back and decide their own
+ * response shape (HTTP JSON vs. a task's 200/502).
+ */
+export async function finalizeDesignRender(
+  design: Design,
+  trace: LangfuseTraceClient,
+  rateLimit: RateLimitResult
+): Promise<FinalizeDesignRenderResult> {
+  try {
+    const updated = await renderDesignArtwork(design, trace, rateLimit);
+    trace.update({ output: { designId: design.id, status: updated.status } });
+
+    // Brew Printrove preview products for every enabled category now, so
+    // they're usually ready by the time a customer picks this design. Never
+    // fails the render — the artwork already rendered successfully, which is
+    // what the customer is waiting on.
+    try {
+      await enqueuePrintroveProducts(design.id);
+    } catch (err) {
+      logger.error("[finalizeDesignRender] Failed to enqueue Printrove preview creation", {
+        designId: design.id,
+        error: err,
+      });
+    }
+
+    return { ok: true, design: updated };
+  } catch (err) {
+    const transient = isTransientProviderError(err);
+    const message = err instanceof Error ? err.message : "Render failed.";
+    trace.update({ tags: ["error"], output: { error: message } });
+    logger.error(`[finalizeDesignRender] Render failed for design ${design.id}: ${message}`, {
+      designId: design.id,
+      error: err,
+    });
+    await prisma.design
+      .update({ where: { id: design.id }, data: { status: "failed", errorMessage: message } })
+      .catch((updateErr) => {
+        logger.error(`[finalizeDesignRender] Failed to persist failure status for design ${design.id}`, {
+          designId: design.id,
+          error: updateErr,
+        });
+      });
+    return { ok: false, error: message, transient };
+  }
 }

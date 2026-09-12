@@ -48,6 +48,9 @@ jobs:
         env:
           EMAIL_QUEUE: ${{ secrets.CLOUD_TASKS_QUEUE_EMAIL }}
           PRINTROVE_QUEUE: ${{ secrets.CLOUD_TASKS_QUEUE_PRINTROVE }}
+          # Not a secret — a queue name isn't sensitive, so this one's just a
+          # literal here rather than adding a third repo secret for it.
+          RENDER_QUEUE: design-render
         run: |
           gcloud services enable cloudtasks.googleapis.com --project="${{ env.PROJECT_ID }}"
 
@@ -96,6 +99,20 @@ jobs:
             --max-doublings=3 \
             --max-concurrent-dispatches=3 \
             --max-dispatches-per-second=1
+
+          # Design-render: one Gemini image call + mockup composite + back
+          # print per task — the actual brewing latency the customer is
+          # watching for, so a fair amount of concurrency (each render lands
+          # on whichever Cloud Run instance has a slot) and a retry window
+          # long enough to ride out a Gemini 429/503 without giving up.
+          ensure_queue "$RENDER_QUEUE" \
+            --max-attempts=4 \
+            --max-retry-duration=1800s \
+            --min-backoff=10s \
+            --max-backoff=120s \
+            --max-doublings=4 \
+            --max-concurrent-dispatches=10 \
+            --max-dispatches-per-second=5
 
       - name: Prepare Env Vars
         id: prep
@@ -158,6 +175,7 @@ jobs:
             EMAIL_FROM=${{ secrets.EMAIL_FROM }}
             CLOUD_TASKS_QUEUE_EMAIL=${{ secrets.CLOUD_TASKS_QUEUE_EMAIL }}
             CLOUD_TASKS_QUEUE_PRINTROVE=${{ secrets.CLOUD_TASKS_QUEUE_PRINTROVE }}
+            CLOUD_TASKS_QUEUE_RENDER=design-render
             GCP_PROJECT_ID=${{ env.PROJECT_ID }}
             GCP_REGION=${{ env.REGION }}
             SITE_URL=${{ secrets.SITE_URL }}

@@ -135,6 +135,12 @@ export interface RateLimitResult {
   tier: RateLimitTier;
   bucketKey: string;
   windowMs: number;
+  // The numeric cap this bucketKey is checked against — carried alongside
+  // ok/bucketKey so a later caller (the design-render task handler, which
+  // runs after the original request that resolved this identity) can
+  // re-check the live count via reevaluateRateLimit() without needing the
+  // original Request or a second settings lookup.
+  limit: number;
 }
 
 function anonIdFromRequest(req: Request): string {
@@ -163,7 +169,7 @@ export async function checkGenerateRateLimit(req: Request): Promise<RateLimitRes
   if (decoded && isAdminToken(decoded)) {
     const bucketKey = "ratelimit:generate:admin";
     const ok = await isUnderLimit(bucketKey, config.maxAdmin, config.windowMs);
-    return { ok, tier: "admin", bucketKey, windowMs: config.windowMs };
+    return { ok, tier: "admin", bucketKey, windowMs: config.windowMs, limit: config.maxAdmin };
   }
 
   if (decoded) {
@@ -171,13 +177,31 @@ export async function checkGenerateRateLimit(req: Request): Promise<RateLimitRes
     const limit = override ?? config.maxSignedIn;
     const bucketKey = `ratelimit:generate:user:${decoded.uid}`;
     const ok = await isUnderLimit(bucketKey, limit, config.windowMs);
-    return { ok, tier: "signedIn", bucketKey, windowMs: config.windowMs };
+    return { ok, tier: "signedIn", bucketKey, windowMs: config.windowMs, limit };
   }
 
   const anonId = anonIdFromRequest(req);
   const bucketKey = `ratelimit:generate:anon:${anonId}`;
   const ok = await isUnderLimit(bucketKey, config.maxAnonymous, config.windowMs);
-  return { ok, tier: "anonymous", bucketKey, windowMs: config.windowMs };
+  return { ok, tier: "anonymous", bucketKey, windowMs: config.windowMs, limit: config.maxAnonymous };
+}
+
+/**
+ * Re-check a previously resolved rate-limit identity against the CURRENT
+ * live count. checkGenerateRateLimit resolves who's calling from a live
+ * Request at brew time; the design-render task handler runs later (often on
+ * a Cloud Tasks dispatch with no Request/cookies at all) and needs to
+ * re-admit each design against the same bucket independently, exactly like
+ * today's per-design /api/generate/retry call does — one shared identity,
+ * checked fresh at each design's actual render moment, so a mid-batch budget
+ * exhaustion still degrades to partial success instead of an all-or-nothing
+ * batch-level gate.
+ */
+export async function reevaluateRateLimit(
+  identity: Pick<RateLimitResult, "tier" | "bucketKey" | "windowMs" | "limit">
+): Promise<RateLimitResult> {
+  const ok = await isUnderLimit(identity.bucketKey, identity.limit, identity.windowMs);
+  return { ...identity, ok };
 }
 
 /**

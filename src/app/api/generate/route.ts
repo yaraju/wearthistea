@@ -13,6 +13,29 @@ import { ANON_ID_HEADER } from "@/lib/anon-id";
 import { getCustomerSession } from "@/lib/auth";
 import { designSlug } from "@/lib/slug";
 import { embedTexts, toVectorParam } from "@/lib/embeddings";
+import { checkGenerateRateLimit } from "@/lib/rate-limit";
+import { enqueueDesignRender } from "@/lib/tasks";
+import { finalizeDesignRender } from "@/lib/design-render";
+
+/** Run `worker` over `items`, at most `concurrency` at a time — used for the
+ * inline-render fallback below (no render queue configured), so a full
+ * batch doesn't pile every slow Gemini call onto this one request/container
+ * at once. Server-side twin of the same helper KeywordStudio.tsx used to
+ * run client-side before rendering moved server-side. */
+async function runWithConcurrency<T>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<void>
+): Promise<void> {
+  let next = 0;
+  async function run(): Promise<void> {
+    const i = next++;
+    if (i >= items.length) return;
+    await worker(items[i]);
+    return run();
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, run));
+}
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -127,6 +150,48 @@ export async function POST(req: Request) {
       throw err;
     });
     createDesignSpan.end({ output: designs.map((d) => d.id) });
+
+    // Dispatch each design's actual artwork render server-side — the whole
+    // point being that this no longer depends on the browser staying open.
+    // Resolve the caller's rate-limit identity once here; each render
+    // re-checks the SAME bucket independently right before it actually spends
+    // it (see reevaluateRateLimit in /api/tasks/render-design), so a
+    // mid-batch budget exhaustion still degrades to partial success exactly
+    // like today's per-design /api/generate/retry call did.
+    const dispatchSpan = trace.span({ name: "dispatch-design-renders" });
+    const rateLimit = await checkGenerateRateLimit(req);
+    const enqueueResults = await Promise.all(
+      designs.map(async (d) => {
+        try {
+          return { id: d.id, queued: await enqueueDesignRender(d.id, rateLimit) };
+        } catch (err) {
+          logger.error("[Stage 1] Failed to enqueue design-render task", { traceId, designId: d.id, error: err });
+          return { id: d.id, queued: false };
+        }
+      })
+    );
+    const needsInline = enqueueResults.filter((r) => !r.queued).map((r) => r.id);
+    if (needsInline.length > 0) {
+      // No render queue configured — only expected in local dev without
+      // `gcloud tasks queues create` having been run (production has it
+      // auto-provisioned by deploy.yml). Render inline instead, same as
+      // enqueueEmail's fallback: awaited, not fire-and-forget, since Cloud
+      // Run can suspend CPU once a response is sent. Limited concurrency so
+      // a full batch of slow Gemini calls doesn't all land on this one
+      // container at once (see KeywordStudio.tsx's old client-side version
+      // of this same guard).
+      logger.info(`[Stage 1] Rendering ${needsInline.length} design(s) inline — render queue not configured`, {
+        traceId,
+        batchId: batch.id,
+      });
+      await runWithConcurrency(needsInline, 2, async (designId) => {
+        const design = designs.find((d) => d.id === designId);
+        if (!design) return;
+        const inlineTrace = langfuse.trace({ name: "generate-inline-render", input: { designId } });
+        await finalizeDesignRender(design, inlineTrace, rateLimit);
+      });
+    }
+    dispatchSpan.end({ output: { queued: enqueueResults.filter((r) => r.queued).length, inline: needsInline.length } });
 
     // Slug + semantic-search embeddings + brew attribution. Wrapped so a
     // failure here (Gemini quota, a bad row) never blocks or fails brewing —

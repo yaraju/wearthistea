@@ -1,10 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { renderDesignArtwork, isTransientProviderError } from "@/lib/design-render";
+import { finalizeDesignRender } from "@/lib/design-render";
 import { checkGenerateRateLimit } from "@/lib/rate-limit";
-import { enqueuePrintroveProducts } from "@/lib/tasks";
-import { logger } from "@/lib/logger";
 import { langfuse, getTraceId } from "@/lib/langfuse";
 import { friendlyError } from "@/lib/error-messages";
 
@@ -42,68 +40,27 @@ export async function POST(req: Request) {
     input: body,
   });
 
-  try {
-    const design = await prisma.design.findUnique({
-      where: { id: designId },
-    });
+  const design = await prisma.design.findUnique({
+    where: { id: designId },
+  });
 
-    if (!design) {
-      return NextResponse.json({ error: "Design not found." }, { status: 404 });
-    }
-
-    const updated = await renderDesignArtwork(design, trace, rateLimit);
-
-    // Brew Printrove preview products for every enabled category now, so
-    // they're usually ready by the time a customer picks this design.
-    // Awaited (not fire-and-forget) — Cloud Run can throttle/suspend CPU
-    // once a response is sent, so a detached promise here isn't reliably
-    // guaranteed to finish (same reasoning as the awaited enqueueEmail calls
-    // elsewhere). Never fails the response either way — the artwork already
-    // rendered successfully, which is what the customer is waiting on; the
-    // pick-time endpoint falls back to creating these on demand regardless.
-    try {
-      await enqueuePrintroveProducts(designId);
-    } catch (err) {
-      logger.error("[generate/retry] Failed to enqueue Printrove preview creation", {
-        designId,
-        error: err,
-      });
-    }
-
-    trace.update({ output: { designId, status: updated.status } });
-    // Never send the full-res print file to a customer-facing caller —
-    // only the downscaled preview. designImagePath/productImagePath stay
-    // server-side (read by fulfillment.ts / design-products.ts).
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { designImagePath, productImagePath, designImageData, backDesignImagePath, ...safeDesign } = updated;
-    return NextResponse.json({ design: safeDesign });
-  } catch (err) {
-    const transient = isTransientProviderError(err);
-    const rawMessage = err instanceof Error ? err.message : "Retry failed.";
-    const message = transient
-      ? "Our design engine is swamped right now — try again in a moment."
-      : friendlyError(rawMessage);
-    trace.update({
-      tags: ["error"],
-      output: { error: rawMessage },
-    });
-    logger.error(`[generate/retry] Render failed for design ${designId}: ${rawMessage}`, {
-      traceId,
-      designId,
-      error: err,
-    });
-    // Best-effort: this route is now also the initial-render path (not just
-    // manual retries), so a design left at "generating" forever after a
-    // failure would look stuck rather than failed on a page reload.
-    await prisma.design
-      .update({ where: { id: designId }, data: { status: "failed", errorMessage: rawMessage } })
-      .catch((updateErr) => {
-        logger.error(`[generate/retry] Failed to persist failure status for design ${designId}`, {
-          traceId,
-          designId,
-          error: updateErr,
-        });
-      });
-    return NextResponse.json({ error: message }, { status: transient ? 503 : 500 });
+  if (!design) {
+    return NextResponse.json({ error: "Design not found." }, { status: 404 });
   }
+
+  const result = await finalizeDesignRender(design, trace, rateLimit);
+
+  if (!result.ok) {
+    const message = result.transient
+      ? "Our design engine is swamped right now — try again in a moment."
+      : friendlyError(result.error);
+    return NextResponse.json({ error: message }, { status: result.transient ? 503 : 500 });
+  }
+
+  // Never send the full-res print file to a customer-facing caller — only
+  // the downscaled preview. designImagePath/productImagePath stay
+  // server-side (read by fulfillment.ts / design-products.ts).
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { designImagePath, productImagePath, designImageData, backDesignImagePath, ...safeDesign } = result.design;
+  return NextResponse.json({ design: safeDesign });
 }
