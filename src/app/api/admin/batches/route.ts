@@ -43,6 +43,12 @@ export async function GET(req: Request) {
         hasImageData: Boolean(design.designImageData),
         printroveMockupUrl: designProduct?.mockupFrontUrl ?? null,
         batch: design.batch,
+        // Plain field reads only — see design-versions.ts's module comment:
+        // an order-linked view must NEVER call resolveLatestDesignVersion(),
+        // this is purely "heads up, a newer version exists" metadata about
+        // the exact Design row this Order references.
+        designSlug: design.slug,
+        designValidationStatus: design.validationStatus,
       })),
       counts: Object.fromEntries(counts.map((c) => [c.status, c._count._all])),
     });

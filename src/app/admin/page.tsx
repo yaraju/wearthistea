@@ -13,7 +13,7 @@ import {
 import type { OrderDTO } from "@/lib/types";
 import { track } from "@/lib/analytics";
 import AdminLogin from "@/components/AdminLogin";
-import AdminReviewModal from "@/components/AdminReviewModal";
+import AdminReviewModal, { type DesignVersionChainSummary } from "@/components/AdminReviewModal";
 
 type Row = OrderDTO;
 
@@ -27,6 +27,8 @@ interface PendingReviewDesign {
   productPreviewImagePath: string;
   backDesignPreviewImagePath: string | null;
   variantColor: string | null;
+  validationStatus?: string;
+  versionChain?: DesignVersionChainSummary[];
   products: { id: string; category: string; label: string; status: string }[];
 }
 
@@ -411,6 +413,28 @@ function QueueCard({ row, onChange }: { row: Row; onChange: () => void }) {
           <p className="mt-3 flex items-start gap-1.5 font-mono text-xs text-pink-ink">
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
             {row.errorMessage}
+          </p>
+        )}
+
+        {row.designValidationStatus === "superseded" && (
+          <p className="mt-3 flex items-start gap-1.5 rounded-lg bg-amber-100 p-2 font-mono text-[11px] text-amber-900">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+            <span>
+              This order&apos;s design has since been superseded by a newer version.
+              {row.designSlug && (
+                <>
+                  {" "}
+                  <a
+                    href={`/design/${row.designSlug}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline"
+                  >
+                    View versions
+                  </a>
+                </>
+              )}
+            </span>
           </p>
         )}
 

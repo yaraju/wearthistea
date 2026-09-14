@@ -6,7 +6,7 @@ import { Loader2, Search } from "lucide-react";
 import { printroveProduct } from "@/config/settings";
 import { getColorCode } from "@/lib/colors";
 import AdminLogin from "@/components/AdminLogin";
-import AdminReviewModal from "@/components/AdminReviewModal";
+import AdminReviewModal, { type DesignVersionChainSummary } from "@/components/AdminReviewModal";
 
 interface CatalogDesignProduct {
   id: string;
@@ -43,6 +43,8 @@ interface CatalogDesign {
   designProducts: CatalogDesignProduct[];
   distance?: number;
   matchedField?: string;
+  validationStatus?: string;
+  versionChain?: DesignVersionChainSummary[];
 }
 
 // Same UX-only client gate as /admin — real enforcement is server-side, see
@@ -261,6 +263,8 @@ function Catalog() {
             visualConcept: open.visualConcept,
             designPrompt: open.designPrompt,
             productPrompt: open.productPrompt,
+            validationStatus: open.validationStatus,
+            versionChain: open.versionChain,
           }}
           items={reviewItemsFor(open)}
           onClose={() => setOpen(null)}

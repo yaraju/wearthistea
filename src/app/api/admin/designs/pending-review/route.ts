@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/auth";
 import { printroveProduct } from "@/config/settings";
+import { getDesignVersionChain } from "@/lib/design-versions";
 
 export const runtime = "nodejs";
 
@@ -37,8 +38,29 @@ export async function GET(req: Request) {
     take: 100,
   });
 
+  // Version-chain awareness (issue #20): an admin reviewing a design that's
+  // since been superseded by an already-regenerated sibling should never
+  // unknowingly approve stale art. Cheap in the common case (#17-#19
+  // haven't landed yet — every real row today is still "unjudged" with no
+  // regeneratedFromDesignId, so this loop makes zero extra queries).
+  const withChains = await Promise.all(
+    designs.map(async (d) => {
+      const isSuperseded = d.validationStatus === "superseded";
+      const versionChain = isSuperseded
+        ? (await getDesignVersionChain(d)).map(({ design: v, isLatest }) => ({
+            id: v.id,
+            slug: v.slug,
+            title: v.title,
+            validationStatus: v.validationStatus,
+            isLatest,
+          }))
+        : undefined;
+      return { d, isSuperseded, versionChain };
+    })
+  );
+
   return NextResponse.json({
-    designs: designs.map((d) => ({
+    designs: withChains.map(({ d, isSuperseded, versionChain }) => ({
       id: d.id,
       title: d.title,
       phrase: d.phrase,
@@ -48,6 +70,9 @@ export async function GET(req: Request) {
       productPreviewImagePath: d.productPreviewImagePath,
       backDesignPreviewImagePath: d.backDesignPreviewImagePath,
       variantColor: d.variantColor,
+      validationStatus: d.validationStatus,
+      isSuperseded,
+      versionChain,
       products: d.designProducts.map((p) => ({
         id: p.id,
         category: p.category,

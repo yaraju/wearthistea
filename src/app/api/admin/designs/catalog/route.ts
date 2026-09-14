@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/auth";
 import { searchDesignsByText, type EmbeddingField } from "@/lib/design-search";
+import { getDesignVersionChain } from "@/lib/design-versions";
 import { decodeCursor, encodeCursor, cursorWhereClause } from "@/lib/keyset-pagination";
 
 export const runtime = "nodejs";
@@ -48,7 +49,31 @@ function toCatalogItem(
     productPreviewImagePath: d.productPreviewImagePath,
     backDesignPreviewImagePath: d.backDesignPreviewImagePath,
     designProducts: d.designProducts,
+    validationStatus: d.validationStatus,
     ...(extra ? { distance: extra.distance, matchedField: extra.matchedField } : {}),
+  };
+}
+
+/**
+ * Version-chain awareness (issue #20): attach `versionChain` only to rows
+ * that are actually superseded — the overwhelmingly common case (#17-#19
+ * haven't landed yet) makes zero extra queries.
+ */
+async function attachVersionChain<I extends { id: string }>(
+  item: I,
+  d: CatalogDesign
+): Promise<I & { versionChain?: Array<{ id: string; slug: string | null; title: string; validationStatus: string; isLatest: boolean }> }> {
+  if (d.validationStatus !== "superseded") return item;
+  const chain = await getDesignVersionChain(d);
+  return {
+    ...item,
+    versionChain: chain.map(({ design: v, isLatest }) => ({
+      id: v.id,
+      slug: v.slug,
+      title: v.title,
+      validationStatus: v.validationStatus,
+      isLatest,
+    })),
   };
 }
 
@@ -83,12 +108,16 @@ export async function GET(req: Request) {
         include: CATALOG_INCLUDE,
       });
       const byId = new Map(rows.map((r) => [r.id, r]));
-      const designs = hits
-        .map((hit) => {
-          const d = byId.get(hit.designId);
-          return d ? toCatalogItem(d, { distance: hit.distance, matchedField: hit.matchedField }) : null;
-        })
-        .filter((d): d is NonNullable<typeof d> => d !== null);
+      const designs = (
+        await Promise.all(
+          hits.map((hit) => {
+            const d = byId.get(hit.designId);
+            return d
+              ? attachVersionChain(toCatalogItem(d, { distance: hit.distance, matchedField: hit.matchedField }), d)
+              : null;
+          })
+        )
+      ).filter((d): d is NonNullable<typeof d> => d !== null);
       return NextResponse.json({ designs, nextCursor: null });
     }
 
@@ -105,7 +134,9 @@ export async function GET(req: Request) {
       take: limit,
     });
     return NextResponse.json({
-      designs: rows.map((d) => toCatalogItem(d, { distance: 0, matchedField: "exact" })),
+      designs: await Promise.all(
+        rows.map((d) => attachVersionChain(toCatalogItem(d, { distance: 0, matchedField: "exact" }), d))
+      ),
       nextCursor: null,
     });
   }
@@ -123,7 +154,7 @@ export async function GET(req: Request) {
   const last = page[page.length - 1];
 
   return NextResponse.json({
-    designs: page.map((d) => toCatalogItem(d)),
+    designs: await Promise.all(page.map((d) => attachVersionChain(toCatalogItem(d), d))),
     nextCursor: hasMore && last ? encodeCursor({ createdAt: last.createdAt.toISOString(), id: last.id }) : null,
   });
 }

@@ -54,6 +54,21 @@ export interface DesignDTO {
   validationStatus?: string;
 }
 
+// One entry in a Design's version-chain lineage (issue #20) — admin-only
+// display, produced by src/lib/design-versions.ts's getDesignVersionChain().
+// Deliberately lean (no full-res paths, no prompts) since this only ever
+// renders as a small "other versions" banner, never a purchase surface.
+export interface DesignVersionSummary {
+  id: string;
+  slug: string | null;
+  title: string;
+  validationStatus: string;
+  isLatest: boolean;
+  isRequested: boolean;
+  productPreviewImagePath: string;
+  designPreviewImagePath: string;
+}
+
 // Shape of an Order (one purchase of a Design) as returned to the admin
 // queue, with the parent Design's creative fields flattened in for display.
 export interface OrderDTO {
@@ -104,6 +119,13 @@ export interface OrderDTO {
   printroveOrderId: string | null;
   trackingNumber: string | null;
   errorMessage: string | null;
+
+  // ── Version-chain awareness (issue #20), admin queue only — a plain read
+  // of Design.validationStatus/slug, never resolveLatestDesignVersion(): an
+  // Order always displays the EXACT Design it references, this is only a
+  // "heads up, a newer version exists" flag + link, never a substitution. ──
+  designSlug?: string | null;
+  designValidationStatus?: string;
 
   createdAt: string;
   updatedAt: string;

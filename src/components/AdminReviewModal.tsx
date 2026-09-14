@@ -1,9 +1,20 @@
 "use client";
 
 import { useState } from "react";
-import { Loader2, Check, X } from "lucide-react";
+import { Loader2, Check, X, AlertTriangle } from "lucide-react";
 import { track } from "@/lib/analytics";
 import DesignProductPreview from "@/components/DesignProductPreview";
+
+// Lean chain-entry shape both pending-review and catalog routes send down
+// when (and only when) a design is actually superseded — see
+// src/lib/design-versions.ts's getDesignVersionChain().
+export interface DesignVersionChainSummary {
+  id: string;
+  slug: string | null;
+  title: string;
+  validationStatus: string;
+  isLatest: boolean;
+}
 
 interface ReviewItem {
   id: string; // DesignProduct id
@@ -33,6 +44,11 @@ interface DesignSummary {
   createdAt?: string;
   createdByEmail?: string | null;
   status?: string;
+  // Version-chain awareness (issue #20) — present whenever the API included
+  // it, which is only when this design is actually validationStatus ===
+  // "superseded" (see pending-review/route.ts and catalog/route.ts).
+  validationStatus?: string;
+  versionChain?: DesignVersionChainSummary[];
 }
 
 /**
@@ -185,6 +201,33 @@ export default function AdminReviewModal({
             </button>
           </div>
         </div>
+
+        {design.validationStatus === "superseded" && (
+          <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 font-mono text-[11px] text-amber-900">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+            <div>
+              <p className="font-bold">This design has been superseded by a regenerated sibling.</p>
+              {design.versionChain && design.versionChain.length > 0 && (
+                <ul className="mt-1 space-y-0.5">
+                  {design.versionChain.map((v) => (
+                    <li key={v.id}>
+                      {v.slug ? (
+                        <a href={`/design/${v.slug}`} target="_blank" rel="noreferrer" className="underline">
+                          {v.title}
+                        </a>
+                      ) : (
+                        v.title
+                      )}{" "}
+                      — {v.validationStatus}
+                      {v.isLatest ? " · latest" : ""}
+                      {v.id === design.id ? " · this one" : ""}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        )}
 
         {mode === "catalog" && (
           <div className="mb-4 rounded-lg bg-gray-50 p-3 font-mono text-[11px] text-gray-600">

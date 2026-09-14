@@ -30,6 +30,9 @@ export async function POST(req: Request) {
     fields: ["keyword"],
     onlyStatus: "generated",
     excludeAllRejected: true,
+    // Customer-facing discovery surface — never match into a design that's
+    // since been superseded by a regenerated sibling (issue #20).
+    excludeSuperseded: true,
   });
 
   return NextResponse.json({ matches: await toDesignMatchDTOs(hits) });

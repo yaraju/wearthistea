@@ -30,6 +30,9 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     onlyStatus: "generated",
     excludeAllRejected: true,
     excludeDesignIds: [designId],
+    // Customer-facing discovery surface — never match into a design that's
+    // since been superseded by a regenerated sibling (issue #20).
+    excludeSuperseded: true,
   });
 
   return NextResponse.json({ matches: await toDesignMatchDTOs(hits) });

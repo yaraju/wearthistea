@@ -24,6 +24,40 @@ export interface SearchOptions {
   excludeDesignIds?: string[];
   onlyStatus?: string; // e.g. "generated"
   excludeAllRejected?: boolean; // drop designs where every DesignProduct combo is rejected
+  // Drop validationStatus === "superseded" rows — a version-chain-aware
+  // design has a current-best sibling elsewhere, so it shouldn't surface as
+  // a result of its own. Opt-in, NOT default-on: /api/admin/designs/search
+  // is a documented stable contract that a judge relies on seeing EVERY
+  // design (including superseded ones) — see that route's own comment.
+  // Only customer-facing discovery surfaces (pre-brewed matches, "similar
+  // designs") should set this; admin search/catalog never do.
+  excludeSuperseded?: boolean;
+}
+
+/**
+ * Builds the outer WHERE clauses for runAnnQuery from a SearchOptions —
+ * split out (and exported) purely so it's unit-testable without a DB: a
+ * fixture SearchOptions in, an array of Prisma.Sql fragments out. See
+ * scripts/test-version-chain.ts for the excludeSuperseded assertion.
+ */
+export function buildAnnFilters(options: SearchOptions): Prisma.Sql[] {
+  const filters: Prisma.Sql[] = [];
+  if (options.onlyStatus) {
+    filters.push(Prisma.sql`d.status = ${options.onlyStatus}`);
+  }
+  if (options.excludeDesignIds && options.excludeDesignIds.length > 0) {
+    filters.push(Prisma.sql`m.id NOT IN (${Prisma.join(options.excludeDesignIds)})`);
+  }
+  if (options.excludeAllRejected) {
+    filters.push(Prisma.sql`(
+      NOT EXISTS (SELECT 1 FROM "DesignProduct" dp WHERE dp."designId" = m.id)
+      OR EXISTS (SELECT 1 FROM "DesignProduct" dp WHERE dp."designId" = m.id AND dp."approvalStatus" <> 'rejected')
+    )`);
+  }
+  if (options.excludeSuperseded) {
+    filters.push(Prisma.sql`d."validationStatus" <> 'superseded'`);
+  }
+  return filters;
 }
 
 /**
@@ -58,19 +92,7 @@ async function runAnnQuery(
     )`;
   });
 
-  const filters: Prisma.Sql[] = [];
-  if (options.onlyStatus) {
-    filters.push(Prisma.sql`d.status = ${options.onlyStatus}`);
-  }
-  if (options.excludeDesignIds && options.excludeDesignIds.length > 0) {
-    filters.push(Prisma.sql`m.id NOT IN (${Prisma.join(options.excludeDesignIds)})`);
-  }
-  if (options.excludeAllRejected) {
-    filters.push(Prisma.sql`(
-      NOT EXISTS (SELECT 1 FROM "DesignProduct" dp WHERE dp."designId" = m.id)
-      OR EXISTS (SELECT 1 FROM "DesignProduct" dp WHERE dp."designId" = m.id AND dp."approvalStatus" <> 'rejected')
-    )`);
-  }
+  const filters = buildAnnFilters(options);
   const whereClause =
     filters.length > 0 ? Prisma.sql`WHERE ${Prisma.join(filters, " AND ")}` : Prisma.empty;
 
