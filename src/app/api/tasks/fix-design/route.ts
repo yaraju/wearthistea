@@ -15,11 +15,12 @@ const Body = z.object({
 // Called by Cloud Tasks (enqueueDesignFix, from judge-design's routing
 // decision) — same shared-secret auth as every other /api/tasks/* route.
 // Delegates to src/lib/validation-chain.ts's runFixStep(), which in turn
-// calls src/lib/design-fix.ts's applyProgrammaticFix() — issue #14's stub,
-// not implemented yet (throws). Until #14 lands, this route will keep
-// returning 502 and Cloud Tasks will keep retrying per the design-fix
-// queue's backoff config — that's expected; see design-fix.ts's doc
-// comment for why this is a deliberate throw rather than a silent no-op.
+// calls src/lib/design-fix.ts's applyProgrammaticFix() (issue #14) to
+// actually relabel/invert-ink/rerun-bg-removal the design. A genuine fix
+// failure still makes this route return 502 so Cloud Tasks retries per the
+// design-fix queue's backoff config — see design-fix.ts's doc comment for
+// why applyProgrammaticFix() throws (rather than silently no-op'ing) on
+// failure.
 export async function POST(req: Request) {
   const secret = req.headers.get("x-task-secret");
   if (!process.env.TASKS_SHARED_SECRET || secret !== process.env.TASKS_SHARED_SECRET) {

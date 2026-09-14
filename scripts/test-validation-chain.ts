@@ -151,7 +151,8 @@ async function fakeLoadImage(): Promise<string> {
 }
 
 async function fakeApplyFix(): Promise<void> {
-  // no-op — issue #14 isn't implemented yet, this stands in for it.
+  // no-op — this test exercises the state machine only, not #14's real
+  // fix implementations (see scripts/test-design-fixes.ts for those).
 }
 
 function fakeRenderFn(design: Design): Promise<Design> {

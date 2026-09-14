@@ -209,9 +209,9 @@ export async function enqueueDesignJudge(designId: string): Promise<boolean> {
  * issue #14) for a design the judge flagged — routed here by judge-design
  * when judgeDesign()'s `fix` field names one of those three and the
  * design's validationFixAttempts budget (cap 2) allows another attempt. See
- * src/lib/design-fix.ts's applyProgrammaticFix() (issue #14's stub, not yet
- * implemented) and src/lib/validation-chain.ts's runFixStep(), which calls
- * it. `verdict` is carried through the task body rather than recomputed —
+ * src/lib/design-fix.ts's applyProgrammaticFix() (issue #14) and
+ * src/lib/validation-chain.ts's runFixStep(), which calls it. `verdict` is
+ * carried through the task body rather than recomputed —
  * judge-design already spent the one Gemini call to get it.
  *
  * No synchronous fallback (same reasoning as enqueueDesignJudge above) —
