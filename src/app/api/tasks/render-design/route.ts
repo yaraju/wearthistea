@@ -5,6 +5,7 @@ import { finalizeDesignRender } from "@/lib/design-render";
 import { reevaluateRateLimit } from "@/lib/rate-limit";
 import { langfuse, getTraceId } from "@/lib/langfuse";
 import { logger } from "@/lib/logger";
+import { enqueueDesignJudge } from "@/lib/tasks";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -88,6 +89,25 @@ export async function POST(req: Request) {
     // the customer's own "Retry Render" button instead of burning through
     // Cloud Tasks' retry budget on something that won't self-resolve.
     return NextResponse.json({ ok: false, error: result.error }, { status: result.transient ? 503 : 200 });
+  }
+
+  // Art rendered successfully — hand off to the judge chain (issue #13)
+  // instead of finishing here. Only advance validationStatus to "pending"
+  // if the judge task was actually queued — see enqueueDesignJudge's doc
+  // comment (src/lib/tasks.ts): with no judge queue configured (local dev),
+  // the design is simply left unjudged, a valid settled state.
+  try {
+    const queued = await enqueueDesignJudge(designId);
+    if (queued) {
+      await prisma.design.update({ where: { id: designId }, data: { validationStatus: "pending" } });
+    } else {
+      logger.info("[render-design task] Judge queue not configured — design left unjudged", { designId });
+    }
+  } catch (err) {
+    logger.error("[render-design task] Failed to enqueue judge task (design left unjudged)", {
+      designId,
+      error: err,
+    });
   }
 
   return NextResponse.json({ ok: true });

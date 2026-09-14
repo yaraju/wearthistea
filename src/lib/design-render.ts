@@ -65,6 +65,23 @@ export async function renderDesignArtwork(
     throw err;
   }
 
+  // Persist variantColor durably BEFORE rendering the back-print composite
+  // below — issue #13's chain requires this ordering explicitly, since
+  // back-print ink color is derived from isDarkGarment(variantColor) (see
+  // back-design.ts's renderBackDesignArtwork). The back-print call a few
+  // lines down already uses the local `variantColor` value directly (not a
+  // DB read), so this write is behaviorally a no-op on the happy path —
+  // it's here so the resolved color is durable on the row immediately
+  // rather than only at the very end alongside every other field, in case
+  // a later step in this function throws. Non-fatal: the final
+  // prisma.design.update below writes variantColor again regardless.
+  await prisma.design.update({ where: { id: design.id }, data: { variantColor } }).catch((err) => {
+    logger.error(
+      "[renderDesignArtwork] Failed to persist early variantColor write (non-fatal, final update will retry)",
+      { designId: design.id, error: err }
+    );
+  });
+
   const base = `${design.id}-${Date.now()}`;
   const { path: designImagePath, previewPath: designPreviewImagePath } = await saveImageWithPreview(
     design.batchId,

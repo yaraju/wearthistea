@@ -51,6 +51,16 @@ jobs:
           # Not a secret — a queue name isn't sensitive, so this one's just a
           # literal here rather than adding a third repo secret for it.
           RENDER_QUEUE: design-render
+          # Same reasoning as RENDER_QUEUE — three more literal, non-secret
+          # queue names for the judge/fix/regenerate chain (issue #13),
+          # deliberately separate queues (not folded into RENDER_QUEUE) so
+          # each workload's dispatch/concurrency profile can be tuned
+          # independently — a cheap pixel-level fix, an LLM vision judge
+          # call, and a full image regeneration have very different cost
+          # and latency shapes.
+          JUDGE_QUEUE: design-judge
+          FIX_QUEUE: design-fix
+          REGENERATE_QUEUE: design-regenerate
         run: |
           gcloud services enable cloudtasks.googleapis.com --project="${{ env.PROJECT_ID }}"
 
@@ -114,6 +124,45 @@ jobs:
             --max-concurrent-dispatches=10 \
             --max-dispatches-per-second=5
 
+          # Design-judge: one Gemini multimodal vision call + a sharp
+          # luminance measurement per task — cheap and fast, but shares
+          # Gemini's own rate limits with rendering, so kept at a lower
+          # concurrency than render rather than piling on independently.
+          ensure_queue "$JUDGE_QUEUE" \
+            --max-attempts=4 \
+            --max-retry-duration=1800s \
+            --min-backoff=10s \
+            --max-backoff=120s \
+            --max-doublings=4 \
+            --max-concurrent-dispatches=5 \
+            --max-dispatches-per-second=5
+
+          # Design-fix: cheap programmatic pixel ops (issue #14), no LLM
+          # call at all once implemented — generous concurrency, shorter
+          # backoff ceiling, same shape as the email queue's tuning.
+          ensure_queue "$FIX_QUEUE" \
+            --max-attempts=5 \
+            --max-retry-duration=3600s \
+            --min-backoff=10s \
+            --max-backoff=300s \
+            --max-doublings=4 \
+            --max-concurrent-dispatches=10 \
+            --max-dispatches-per-second=5
+
+          # Design-regenerate: a full Gemini image render + mockup composite
+          # + back print for a brand-new sibling design (issue #15) — same
+          # cost shape as render, but capped at a single attempt by
+          # REGEN_ATTEMPT_CAP application-side, so kept at lower concurrency
+          # than render to leave headroom for the customer-facing path.
+          ensure_queue "$REGENERATE_QUEUE" \
+            --max-attempts=4 \
+            --max-retry-duration=1800s \
+            --min-backoff=10s \
+            --max-backoff=120s \
+            --max-doublings=4 \
+            --max-concurrent-dispatches=5 \
+            --max-dispatches-per-second=3
+
       - name: Prepare Env Vars
         id: prep
         shell: bash
@@ -176,6 +225,9 @@ jobs:
             CLOUD_TASKS_QUEUE_EMAIL=${{ secrets.CLOUD_TASKS_QUEUE_EMAIL }}
             CLOUD_TASKS_QUEUE_PRINTROVE=${{ secrets.CLOUD_TASKS_QUEUE_PRINTROVE }}
             CLOUD_TASKS_QUEUE_RENDER=design-render
+            CLOUD_TASKS_QUEUE_JUDGE=design-judge
+            CLOUD_TASKS_QUEUE_FIX=design-fix
+            CLOUD_TASKS_QUEUE_REGENERATE=design-regenerate
             GCP_PROJECT_ID=${{ env.PROJECT_ID }}
             GCP_REGION=${{ env.REGION }}
             SITE_URL=${{ secrets.SITE_URL }}

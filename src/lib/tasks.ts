@@ -2,6 +2,7 @@ import { CloudTasksClient } from "@google-cloud/tasks";
 import { sendEmail, type EmailPayload } from "./email";
 import { logger } from "./logger";
 import type { RateLimitResult } from "./rate-limit";
+import type { JudgeVerdict } from "./design-judge";
 
 let client: CloudTasksClient | null = null;
 
@@ -146,6 +147,156 @@ export async function enqueueDesignRender(designId: string, rateLimit: RateLimit
         url: `${siteUrl.replace(/\/$/, "")}/api/tasks/render-design`,
         headers: { "Content-Type": "application/json", "X-Task-Secret": sharedSecret },
         body: Buffer.from(JSON.stringify({ designId, rateLimit })).toString("base64"),
+      },
+    },
+  });
+  return true;
+}
+
+/**
+ * Queue a rendered design's judge pass (issue #13) — src/lib/
+ * validation-chain.ts's runJudgeStep(), dispatched by
+ * /api/tasks/judge-design. Enqueued right after a fresh render succeeds
+ * (see /api/tasks/render-design/route.ts) and again by fix-design/
+ * regenerate-design once their own step finishes, closing the
+ * judge -> fix/regenerate -> judge loop.
+ *
+ * Deliberately NO synchronous fallback when CLOUD_TASKS_QUEUE_JUDGE isn't
+ * configured (e.g. local dev) — same reasoning as enqueuePrintroveProducts:
+ * an unjudged design (validationStatus just stays at its current value,
+ * "unjudged" by default) is a valid, harmless settled state from
+ * KeywordStudio.tsx's polling perspective (see validation-status.ts's
+ * IN_FLIGHT_VALIDATION_STATUSES), not a stuck-forever pathology the way an
+ * unrendered design would be. Callers should only advance validationStatus
+ * to "pending" when this returns true — see /api/tasks/render-design/route.ts.
+ */
+export async function enqueueDesignJudge(designId: string): Promise<boolean> {
+  const queueName = process.env.CLOUD_TASKS_QUEUE_JUDGE;
+  const siteUrl = process.env.SITE_URL;
+  const sharedSecret = process.env.TASKS_SHARED_SECRET;
+
+  if (!queueName || !siteUrl || !sharedSecret) {
+    logger.info("[tasks] Judge queue not configured — design left unjudged", { designId });
+    return false;
+  }
+
+  const projectId = process.env.GCP_PROJECT_ID || "wearthistea";
+  const location = process.env.GCP_REGION || "us-central1";
+
+  if (!client) client = new CloudTasksClient();
+  const parent = client.queuePath(projectId, location, queueName);
+
+  await client.createTask({
+    parent,
+    task: {
+      // One Gemini multimodal judge call + a sharp luminance measurement —
+      // comfortably under a couple of minutes even accounting for a slow
+      // Gemini response.
+      dispatchDeadline: { seconds: 3 * 60 },
+      httpRequest: {
+        httpMethod: "POST",
+        url: `${siteUrl.replace(/\/$/, "")}/api/tasks/judge-design`,
+        headers: { "Content-Type": "application/json", "X-Task-Secret": sharedSecret },
+        body: Buffer.from(JSON.stringify({ designId })).toString("base64"),
+      },
+    },
+  });
+  return true;
+}
+
+/**
+ * Queue a cheap programmatic fix (relabel / invert-ink / rerun-bg-removal,
+ * issue #14) for a design the judge flagged — routed here by judge-design
+ * when judgeDesign()'s `fix` field names one of those three and the
+ * design's validationFixAttempts budget (cap 2) allows another attempt. See
+ * src/lib/design-fix.ts's applyProgrammaticFix() (issue #14's stub, not yet
+ * implemented) and src/lib/validation-chain.ts's runFixStep(), which calls
+ * it. `verdict` is carried through the task body rather than recomputed —
+ * judge-design already spent the one Gemini call to get it.
+ *
+ * No synchronous fallback (same reasoning as enqueueDesignJudge above) —
+ * without the queue configured, the design is simply left at
+ * "regenerating" with nothing to redrive it, which is a harmless (if
+ * permanently in-flight-looking) local-dev-only state.
+ */
+export async function enqueueDesignFix(designId: string, verdict: JudgeVerdict): Promise<boolean> {
+  const queueName = process.env.CLOUD_TASKS_QUEUE_FIX;
+  const siteUrl = process.env.SITE_URL;
+  const sharedSecret = process.env.TASKS_SHARED_SECRET;
+
+  if (!queueName || !siteUrl || !sharedSecret) {
+    logger.info('[tasks] Fix queue not configured — design left at "regenerating" with nothing to redrive it', {
+      designId,
+    });
+    return false;
+  }
+
+  const projectId = process.env.GCP_PROJECT_ID || "wearthistea";
+  const location = process.env.GCP_REGION || "us-central1";
+
+  if (!client) client = new CloudTasksClient();
+  const parent = client.queuePath(projectId, location, queueName);
+
+  await client.createTask({
+    parent,
+    task: {
+      // Cheap pixel-level ops (relabel/invert-ink/rerun-bg-removal), no LLM
+      // call — should complete in well under a minute.
+      dispatchDeadline: { seconds: 2 * 60 },
+      httpRequest: {
+        httpMethod: "POST",
+        url: `${siteUrl.replace(/\/$/, "")}/api/tasks/fix-design`,
+        headers: { "Content-Type": "application/json", "X-Task-Secret": sharedSecret },
+        body: Buffer.from(JSON.stringify({ designId, verdict })).toString("base64"),
+      },
+    },
+  });
+  return true;
+}
+
+/**
+ * Queue a full sibling regeneration (issue #15) for a design the judge
+ * decided needs one — routed here by judge-design when judgeDesign()'s
+ * `fix` field is "regenerate" (or the cheap-fix budget is exhausted and a
+ * regen attempt is still available). See src/lib/validation-chain.ts's
+ * runRegenerateStep() (creates the sibling + renders it — reuses
+ * design-judge-bulk.ts's flagAndTriggerStuckDesign() /
+ * /api/admin/designs/[id]/regenerate/route.ts's sibling-creation
+ * precedent) and src/lib/design-regenerate.ts's buildRegenerationConcept()
+ * (issue #15's stub — today a verbatim passthrough of the source's concept
+ * text).
+ *
+ * No synchronous fallback — same reasoning as enqueueDesignFix above.
+ */
+export async function enqueueDesignRegenerate(designId: string, verdict: JudgeVerdict): Promise<boolean> {
+  const queueName = process.env.CLOUD_TASKS_QUEUE_REGENERATE;
+  const siteUrl = process.env.SITE_URL;
+  const sharedSecret = process.env.TASKS_SHARED_SECRET;
+
+  if (!queueName || !siteUrl || !sharedSecret) {
+    logger.info('[tasks] Regenerate queue not configured — design left at "regenerating" with nothing to redrive it', {
+      designId,
+    });
+    return false;
+  }
+
+  const projectId = process.env.GCP_PROJECT_ID || "wearthistea";
+  const location = process.env.GCP_REGION || "us-central1";
+
+  if (!client) client = new CloudTasksClient();
+  const parent = client.queuePath(projectId, location, queueName);
+
+  await client.createTask({
+    parent,
+    task: {
+      // Same budget as design-render: a full Gemini image render + mockup
+      // composite + back print for the new sibling.
+      dispatchDeadline: { seconds: 5 * 60 },
+      httpRequest: {
+        httpMethod: "POST",
+        url: `${siteUrl.replace(/\/$/, "")}/api/tasks/regenerate-design`,
+        headers: { "Content-Type": "application/json", "X-Task-Secret": sharedSecret },
+        body: Buffer.from(JSON.stringify({ designId, verdict })).toString("base64"),
       },
     },
   });

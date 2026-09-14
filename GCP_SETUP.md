@@ -121,12 +121,20 @@ Add the following secrets to your GitHub repository:
   tuning — see the "Ensure Cloud Tasks queues" step in `deploy.yml`. Also
   auto-created by the deploy workflow.
 - `SITE_URL`: The publicly reachable base URL Cloud Tasks calls back into
-  (e.g. `https://wearthistea.web.app`) — both queues' task handlers live
+  (e.g. `https://wearthistea.web.app`) — every queue's task handlers live
   under this origin.
 - `TASKS_SHARED_SECRET`: Any random string (e.g. `openssl rand -hex 32`).
   Sent back by Cloud Tasks as the `X-Task-Secret` header and checked by the
   task-handler routes (`/api/tasks/*`) since Cloud Tasks can't authenticate
-  as a signed-in site user. Shared across both queues.
+  as a signed-in site user. Shared across every queue.
+- Design rendering (`CLOUD_TASKS_QUEUE_RENDER`) and the judge -> fix/
+  regenerate -> judge validation chain (`CLOUD_TASKS_QUEUE_JUDGE`,
+  `CLOUD_TASKS_QUEUE_FIX`, `CLOUD_TASKS_QUEUE_REGENERATE`, issue #13) don't
+  need their own secrets — their names (`design-render`, `design-judge`,
+  `design-fix`, `design-regenerate`) are literal, non-secret values
+  hardcoded directly in `deploy.yml`'s "Ensure Cloud Tasks queues" step,
+  auto-created/reconciled on every deploy the same way the two queues above
+  are.
 
 ## 6. Cloud Run Service Account
 Ensure the default Compute Engine service account (or the one used by Cloud Run) has `Storage Object Admin` permissions for the GCS bucket.
