@@ -269,6 +269,133 @@ export async function renderConceptArt(
 }
 
 /**
+ * Image-to-image EDIT: pairs a targeted instruction (prompts.designImageFix)
+ * with an existing rendered image as an input part, and asks for a
+ * minimally changed result — issue #15's alternative to a from-scratch
+ * re-roll (generateImage()/renderConceptArt() above). Always goes through
+ * the native Gemini multimodal generateContent path, same as
+ * generateImage()'s non-Imagen branch — NEVER routes through generateImages
+ * (the Images API branch), which takes no input image at all and so cannot
+ * edit anything; this function throws rather than silently falling back to
+ * a from-scratch re-roll if handed an Imagen-named model.
+ */
+export async function generateImageEdit(
+  prompt: string,
+  inputImageB64: string,
+  modelOverride?: string,
+  parent?: any
+): Promise<GeneratedImage> {
+  const model = modelOverride || settings.gemini.imagenFastModel;
+  const observation = (parent || langfuse).generation({
+    name: "generateImageEdit",
+    model,
+    input: prompt,
+  });
+
+  if (!hasApiKey()) {
+    // No Gemini key — return a 1×1 transparent placeholder so the pipeline completes.
+    observation.end({ output: DUMMY_PNG_B64 });
+    return { imageB64: DUMMY_PNG_B64 };
+  }
+
+  if (model.toLowerCase().includes("imagen")) {
+    const message =
+      `generateImageEdit() requires the native Gemini multimodal path (image-to-image editing) — ` +
+      `model "${model}" is an Imagen Images-API model, which takes no input image and cannot edit ` +
+      `anything. Pass a non-Imagen model instead (e.g. settings.gemini.imagenFastModel's default).`;
+    observation.end({ level: "error", statusMessage: message });
+    throw new Error(message);
+  }
+
+  try {
+    // Input image part comes FIRST, targeted instruction SECOND — the model
+    // treats the image as the thing being edited and the text as the edit
+    // instruction, mirroring generateImage()'s own [text] ordering being the
+    // sole content there. TEXT is requested alongside IMAGE for the same
+    // reason as generateImage(): a fresh COLOR_CHOICE self-report (see
+    // prompts.designImageFix()'s doc comment).
+    const res = await ai().models.generateContent({
+      model,
+      contents: [
+        {
+          role: "user",
+          parts: [{ inlineData: { mimeType: "image/png", data: inputImageB64 } }, { text: prompt }],
+        },
+      ],
+      config: { responseModalities: ["TEXT", "IMAGE"] },
+    });
+
+    const parts = res.candidates?.[0]?.content?.parts ?? [];
+    let imageB64: string | undefined;
+    let text = "";
+    for (const part of parts) {
+      if (part.inlineData?.data && !imageB64) imageB64 = part.inlineData.data;
+      if (part.text) text += part.text;
+    }
+
+    if (!imageB64) {
+      throw new Error(`Image-edit model "${model}" returned no image data for the targeted regeneration.`);
+    }
+
+    observation.end({ output: { image: "[image data]", text } });
+    return { imageB64, text: text || undefined };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    observation.end({ level: "error", statusMessage: message });
+    throw err;
+  }
+}
+
+/**
+ * Render a targeted image-to-image FIX of a concept's existing artwork —
+ * issue #15's alternative render path to renderConceptArt() above, used by
+ * design-regenerate.ts / validation-chain.ts's regenerate-design task
+ * instead of a from-scratch re-roll. Pairs prompts.designImageFix() with the
+ * source image via generateImageEdit(), then applies the SAME
+ * post-processing renderConceptArt() applies to a fresh render (background
+ * removal, resolveGarmentColor()'s fresh COLOR_CHOICE self-report parse) —
+ * EXCEPT the svg phrase-band compositing: the sourceImageB64 handed in here
+ * is always a design's already-FINAL rendered art (design.designImagePath/
+ * designImageData), which for a "svg"-style design already has
+ * compositePhraseBand()'s band baked into its pixels (see renderConceptArt's
+ * own `composed` branch, and design-render.ts's renderDesignArtwork, which
+ * is what produced it originally) — compositing a second band here would
+ * print the phrase twice. If an edit happens to change the resolved
+ * variantColor for an "svg" design, the now-mismatched baked band ink is
+ * caught by the NEXT judge pass via the existing "invert-ink" cheap fix
+ * (design-fixes.ts), not handled here — the same self-healing route any
+ * other post-regeneration color mismatch already takes through this state
+ * machine (validation-chain.ts).
+ */
+export async function renderConceptArtFix(
+  concept: Concept,
+  sourceImageB64: string,
+  instruction: string,
+  parent?: any,
+  runBgRemoval: (fn: () => Promise<string>) => Promise<string> = (fn) => fn(),
+  deps: { generateEdit?: typeof generateImageEdit } = {}
+): Promise<RenderedConceptArt> {
+  const generateEdit = deps.generateEdit ?? generateImageEdit;
+  const fixPrompt = prompts.designImageFix(concept, instruction);
+
+  const generated = await generateEdit(fixPrompt, sourceImageB64, settings.gemini.imagenFastModel, parent);
+
+  let imageB64 = generated.imageB64;
+  try {
+    imageB64 = await runBgRemoval(() => removeBgB64(imageB64));
+  } catch {
+    // Best-effort, same rationale as renderConceptArt: the prompt already
+    // asks for a transparent background, so fall back to the model's raw
+    // edited output rather than failing the regeneration over this local
+    // step.
+  }
+
+  const variantColor = await resolveGarmentColor(generated.text, imageB64);
+
+  return { imageB64, variantColor };
+}
+
+/**
  * Strict token the designImage()/designImageArtOnly() prompts instruct the
  * model to end its response with (see GARMENT_COLOR_CHOICE in prompts.ts).
  * Matched against a whole line (^...$ with /m) so stray surrounding prose

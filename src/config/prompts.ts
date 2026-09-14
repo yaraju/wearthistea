@@ -360,6 +360,42 @@ ${c.backPhrase ? `CONTEXT ONLY — do not draw this: the BACK of this shirt sepa
 ${ART_RULES}
 `.trim(),
 
+  /** ── 2.1 TARGETED IMAGE-TO-IMAGE FIX — image model, issue #15 ────────────
+   * Short, targeted edit prompt paired with the design's CURRENT rendered
+   * art as an input image part (see gemini.ts's generateImageEdit() /
+   * renderConceptArtFix()) — a minimal instruction to change exactly one
+   * thing, not a from-scratch re-roll of designImage()/designImageArtOnly()
+   * above. Still ends with GARMENT_COLOR_CHOICE's MANDATORY RESPONSE FORMAT
+   * block so the edited image gets its own fresh COLOR_CHOICE self-report —
+   * an edit CAN legitimately land on the opposite garment color from the
+   * original (e.g. correcting ink that never worked against its claimed
+   * color), and gemini.ts's resolveGarmentColor() needs that line every
+   * time to avoid silently falling back to a luminance guess.
+   */
+  designImageFix: (c: Pick<Concept, "phrase" | "visualConcept">, instruction: string) =>
+    `
+You are given the CURRENT print-ready artwork for a t-shirt design as the
+attached reference image. This is a targeted edit, not a new illustration —
+the attached image is the starting point and ground truth for everything
+except the one change below.
+
+Keep composition, subject, pose, illustration style, line weight, palette,
+and layout EXACTLY as shown in the attached image, with this ONE change:
+
+${clean(instruction)}
+
+Reference only, for context — do not redraw from scratch:
+Phrase: ${q(c.phrase)}
+Visual concept: ${clean(c.visualConcept)}
+
+The result must still be a single isolated PRINT GRAPHIC floating alone on a
+transparent background — no shirt, sleeve, collar, neckline, mannequin, or
+any other garment shape anywhere in the frame, no watermark, signature, or
+extra caption. Do not change anything not called out above.
+
+${GARMENT_COLOR_CHOICE}
+`.trim(),
+
   /**
    * Recommended production alternative:
    * Generate art WITHOUT text, then overlay the phrase yourself with SVG/Canvas.

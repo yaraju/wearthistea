@@ -1,9 +1,10 @@
 /**
  * The judge -> fix/regenerate -> judge state machine (issue #13). Wires
  * together design-judge.ts's judgeDesign() (issue #12), design-fix.ts's
- * applyProgrammaticFix() stub (issue #14), and design-regenerate.ts's
- * buildRegenerationConcept() stub (issue #15) into the actual transitions
- * described by Design.validationStatus's state machine (see
+ * applyProgrammaticFix() (issue #14's programmatic fixes), and
+ * design-regenerate.ts's buildRegenerationConcept()/buildRegenerationEdit()
+ * (issue #15's targeted image-to-image regeneration) into the actual
+ * transitions described by Design.validationStatus's state machine (see
  * prisma/schema.prisma's comment on that column, issue #11, and
  * src/lib/validation-status.ts's VALIDATION_STATUSES).
  *
@@ -86,7 +87,7 @@ import type { Design, Prisma } from "@prisma/client";
 import { z } from "zod";
 import { judgeDesign, type JudgeVerdict } from "./design-judge";
 import { applyProgrammaticFix } from "./design-fix";
-import { buildRegenerationConcept, type RegenerationSourceDesign } from "./design-regenerate";
+import { buildRegenerationConcept, buildRegenerationEdit, type RegenerationSourceDesign } from "./design-regenerate";
 import { assertDesignPathFieldsShape } from "./storage";
 import { logger } from "./logger";
 
@@ -346,8 +347,18 @@ export interface RegenerateStepDeps {
    * renderDesignArtwork() with a synthetic unlimited-budget rate limit —
    * same pattern as design-judge-bulk.ts's flagAndTriggerStuckDesign(),
    * since this is a system-triggered render, not a customer action. Tests
-   * inject a fake instead of spending a real Gemini call. */
-  renderFn?: (sibling: Design) => Promise<Design>;
+   * inject a fake instead of spending a real Gemini call.
+   *
+   * Receives `source` and `verdict` alongside `sibling` (issue #15) so the
+   * default implementation can load the SOURCE's current image and pair it
+   * with verdict.regenerationPrompt for a targeted image-to-image edit
+   * (design-regenerate.ts's buildRegenerationEdit() ->
+   * gemini.ts's renderConceptArtFix()) instead of a from-scratch re-roll. A
+   * fake that only accepts one argument (e.g. scripts/test-validation-
+   * chain.ts's fakeRenderFn) remains a valid implementation of this type —
+   * TS allows a function with fewer parameters to satisfy a type expecting
+   * more — so existing tests need no changes for this widening. */
+  renderFn?: (sibling: Design, source: Design, verdict: JudgeVerdict) => Promise<Design>;
 }
 
 export interface RegenerateStepResult {
@@ -362,7 +373,23 @@ export interface RegenerateStepResult {
   error?: string;
 }
 
-async function defaultRegenerateRenderFn(sibling: Design): Promise<Design> {
+/**
+ * Default renderFn (issue #15): a TARGETED image-to-image edit of the
+ * source design's current art, not a from-scratch re-roll — loads the
+ * source's current image (loadDesignImageBase64(), same helper judge-design
+ * uses) and pairs it with buildRegenerationEdit(verdict)'s instruction via
+ * renderDesignArtwork()'s `edit` parameter (design-render.ts ->
+ * gemini.ts's renderConceptArtFix()).
+ *
+ * If loading the source's image fails (missing GCS object, no DB fallback
+ * copy, etc.), this falls back to a from-scratch re-roll (renderFn's `edit`
+ * left undefined) rather than throwing — by the time renderFn runs, the
+ * source has already been marked "superseded" and the sibling row already
+ * exists with no other owner watching it, so a hard failure here would
+ * leave the sibling stuck at "generating" forever with nothing left to
+ * redrive it. A same-quality-bar re-roll is a better outcome than that.
+ */
+async function defaultRegenerateRenderFn(sibling: Design, source: Design, verdict: JudgeVerdict): Promise<Design> {
   const { renderDesignArtwork } = await import("./design-render");
   const { langfuse } = await import("./langfuse");
   const trace = langfuse.trace({ name: "regenerate-design-task", input: { designId: sibling.id } });
@@ -375,7 +402,19 @@ async function defaultRegenerateRenderFn(sibling: Design): Promise<Design> {
     windowMs: 60 * 60 * 1000,
     limit: Number.MAX_SAFE_INTEGER,
   };
-  return renderDesignArtwork(sibling, trace, rateLimit);
+
+  let edit: { sourceImageB64: string; instruction: string } | undefined;
+  try {
+    const sourceImageB64 = await loadDesignImageBase64(source);
+    edit = { sourceImageB64, instruction: buildRegenerationEdit(verdict).instruction };
+  } catch (err) {
+    logger.error(
+      `[defaultRegenerateRenderFn] Failed to load source design's image for a targeted edit — falling back to a from-scratch re-roll for design ${source.id} -> sibling ${sibling.id}: ${err instanceof Error ? err.message : String(err)}`,
+      { designId: source.id, siblingId: sibling.id, error: err }
+    );
+  }
+
+  return renderDesignArtwork(sibling, trace, rateLimit, edit);
 }
 
 export async function runRegenerateStep(
@@ -452,7 +491,7 @@ export async function runRegenerateStep(
 
   if (sibling.status === "generating") {
     try {
-      sibling = await renderFn(sibling);
+      sibling = await renderFn(sibling, design, verdict);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logger.error(`[runRegenerateStep] Sibling render failed for design ${design.id} -> ${sibling.id}: ${message}`, {

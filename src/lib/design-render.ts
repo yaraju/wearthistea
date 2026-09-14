@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { renderConceptArt, isTransientProviderError } from "@/lib/gemini";
+import { renderConceptArt, renderConceptArtFix, isTransientProviderError } from "@/lib/gemini";
 import type { Concept } from "@/config/prompts";
 import { compositeOnTee } from "@/lib/mockup";
 import { renderBackDesignArtwork, type BackLayout } from "@/lib/back-design";
@@ -29,18 +29,34 @@ export { isTransientProviderError };
  * that differs slightly between callers (retry marks the SAME design
  * failed; regenerate leaves a freshly-cloned design failed and creates no
  * Order).
+ *
+ * `edit` (issue #15) switches this from a from-scratch re-roll to a
+ * targeted image-to-image FIX: when set, `edit.sourceImageB64` (the
+ * design-being-regenerated-FROM's current art) is paired with
+ * `edit.instruction` (the judge's regenerationPrompt) via
+ * gemini.ts's renderConceptArtFix() instead of renderConceptArt(). Every
+ * step after that point — variantColor persistence, mockup compositing, and
+ * critically the back-print re-render below — is untouched and runs
+ * identically either way: the back-print composite is ALWAYS rendered
+ * against the freshly-resolved `variantColor` local (never a stale DB
+ * read), which is what makes it structurally correct whether or not this
+ * particular render actually changed the color — the same standing rule
+ * design-fixes.ts's relabelVariantColor() enforces explicitly, satisfied
+ * here for free by not caching a color from before this render ran.
  */
 export async function renderDesignArtwork(
   design: Design,
   trace: LangfuseTraceClient,
-  rateLimit: RateLimitResult
+  rateLimit: RateLimitResult,
+  edit?: { sourceImageB64: string; instruction: string }
 ) {
   // `color` is intentionally omitted here — garment color is no longer a
   // caller-supplied instruction (see prompts.ts's GARMENT_COLOR_CHOICE):
-  // renderConceptArt() below resolves it FROM the actual rendered pixels
-  // (the model's own self-report, or a luminance fallback) and returns it
-  // alongside the image, so it's written to `Design.variantColor` for the
-  // first time right after this, not read from it beforehand.
+  // renderConceptArt()/renderConceptArtFix() below resolve it FROM the
+  // actual rendered pixels (the model's own self-report, or a luminance
+  // fallback) and return it alongside the image, so it's written to
+  // `Design.variantColor` for the first time right after this, not read
+  // from it beforehand.
   const concept: Concept = {
     title: design.title,
     phrase: design.phrase,
@@ -54,7 +70,9 @@ export async function renderDesignArtwork(
   let designB64: string;
   let variantColor: string;
   try {
-    const rendered = await renderConceptArt(concept, trace);
+    const rendered = edit
+      ? await renderConceptArtFix(concept, edit.sourceImageB64, edit.instruction, trace)
+      : await renderConceptArt(concept, trace);
     designB64 = rendered.imageB64;
     variantColor = rendered.variantColor;
     await recordGenerateUsage(rateLimit);

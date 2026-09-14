@@ -20,10 +20,12 @@ const Body = z.object({
 // /api/admin/designs/[id]/regenerate/route.ts's sibling-creation
 // precedent — see that function's doc comment), renders it for real, marks
 // the SOURCE design "superseded", and hands back the sibling's id to
-// re-enqueue judge against. The concept text used for the sibling
-// (src/lib/design-regenerate.ts's buildRegenerationConcept()) is issue
-// #15's stub — today a verbatim passthrough of the source's concept, not
-// yet incorporating the judge's regenerationPrompt.
+// re-enqueue judge against. The sibling's rendered artwork (issue #15) is a
+// TARGETED image-to-image edit of the source's current art — the source's
+// concept text (src/lib/design-regenerate.ts's buildRegenerationConcept())
+// stays a deliberate passthrough, while buildRegenerationEdit() turns the
+// judge's regenerationPrompt into the edit instruction actually applied via
+// gemini.ts's renderConceptArtFix().
 export async function POST(req: Request) {
   const secret = req.headers.get("x-task-secret");
   if (!process.env.TASKS_SHARED_SECRET || secret !== process.env.TASKS_SHARED_SECRET) {
