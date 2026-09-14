@@ -110,7 +110,10 @@ export const settings = {
     ]),
     /**
      * The only garment categories we generate designs for and sell — half
-     * sleeve, black only, capped at each product's flat-cost size tier (see
+     * sleeve, Black + White (see #5 — garment color is self-reported per
+     * Design via `variantColor`, not user-picked, so both need a real
+     * variant id here for whichever color a given design's art was actually
+     * rendered for), capped at each product's flat-cost size tier (see
      * the business_base_price jump per size in Printrove's catalog; adding a
      * larger/older size back in means adding it here once its cost is priced
      * in, not just extending `variantMap`). Every id below (subtypeId,
@@ -137,7 +140,12 @@ export const settings = {
         sizeAttrId: 1,
         colorAttrId: 2,
         // Capped at S–XL — cost jumps 165 -> 180/200/220/230 at 2XL–5XL.
-        variantMap: { "Black|S": 269, "Black|M": 270, "Black|L": 271, "Black|XL": 272 } as Record<string, number>,
+        // White ids verified live 2026-09-15 against GET /api/product/460
+        // (see docs/back-design-printrove-verification.md) — #5.
+        variantMap: {
+          "Black|S": 269, "Black|M": 270, "Black|L": 271, "Black|XL": 272,
+          "White|S": 264, "White|M": 265, "White|L": 266, "White|XL": 267,
+        } as Record<string, number>,
         frame: { width: 4680, height: 5880 },
         retailPrice: num(process.env.PRINTROVE_RETAIL_PRICE_MEN, 599),
         // Size used to build the one preview mockup for this category — a
@@ -155,7 +163,12 @@ export const settings = {
         sizeAttrId: 5,
         colorAttrId: 6,
         // Capped at XS–XL — cost jumps 155 -> 165/180/200/220 at 2XL–5XL.
-        variantMap: { "Black|XS": 335, "Black|S": 333, "Black|M": 332, "Black|L": 331, "Black|XL": 334 } as Record<string, number>,
+        // White ids verified live 2026-09-15 against GET /api/product/462
+        // (see docs/back-design-printrove-verification.md) — #5.
+        variantMap: {
+          "Black|XS": 335, "Black|S": 333, "Black|M": 332, "Black|L": 331, "Black|XL": 334,
+          "White|XS": 375, "White|S": 373, "White|M": 372, "White|L": 371, "White|XL": 374,
+        } as Record<string, number>,
         frame: { width: 3480, height: 4350 },
         retailPrice: num(process.env.PRINTROVE_RETAIL_PRICE_WOMEN, 599),
         previewSize: "M",
@@ -169,7 +182,12 @@ export const settings = {
         sizeAttrId: 12,
         colorAttrId: 11,
         // Sizes are ages, not S/M/L. Capped at 1–4 — cost jumps 130 -> 150 at age 6.
-        variantMap: { "Black|1": 636, "Black|2": 644, "Black|3": 652, "Black|4": 660 } as Record<string, number>,
+        // White ids verified live 2026-09-15 against GET /api/product/560
+        // (see docs/back-design-printrove-verification.md) — #5.
+        variantMap: {
+          "Black|1": 636, "Black|2": 644, "Black|3": 652, "Black|4": 660,
+          "White|1": 637, "White|2": 645, "White|3": 653, "White|4": 661,
+        } as Record<string, number>,
         frame: { width: 2100, height: 2340 },
         retailPrice: num(process.env.PRINTROVE_RETAIL_PRICE_TODDLER, 599),
         previewSize: "2",
@@ -183,7 +201,12 @@ export const settings = {
         sizeAttrId: 14,
         colorAttrId: 13,
         // Sizes are ages, not S/M/L. Flat cost (150) across the offered range — no cap needed.
-        variantMap: { "Black|8": 676, "Black|10": 684, "Black|12": 692, "Black|14": 700 } as Record<string, number>,
+        // White ids verified live 2026-09-15 against GET /api/product/561
+        // (see docs/back-design-printrove-verification.md) — #5.
+        variantMap: {
+          "Black|8": 676, "Black|10": 684, "Black|12": 692, "Black|14": 700,
+          "White|8": 677, "White|10": 685, "White|12": 693, "White|14": 701,
+        } as Record<string, number>,
         frame: { width: 3480, height: 4350 },
         retailPrice: num(process.env.PRINTROVE_RETAIL_PRICE_KIDS, 599),
         previewSize: "10",

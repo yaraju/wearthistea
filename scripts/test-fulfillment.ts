@@ -7,8 +7,14 @@ console.log("PRINTROVE_PRODUCT_SUBTYPE_ID:", process.env.PRINTROVE_PRODUCT_SUBTY
 async function main() {
   const { fulfill } = await import("../src/lib/printrove");
   const createOrder = process.argv.includes("--order");
-  
-  console.log(`Starting test fulfillment (createOrder: ${createOrder})`);
+  // --color=White (default Black) — added for #5 to verify a non-Black
+  // garment resolves via resolveVariantIdDynamically against the live
+  // PrintRove catalog, using this same established script rather than a
+  // scratch one, per AGENTS.md's Testing section.
+  const colorArg = process.argv.find((a) => a.startsWith("--color="));
+  const color = colorArg ? colorArg.split("=")[1] : "Black";
+
+  console.log(`Starting test fulfillment (createOrder: ${createOrder}, color: ${color})`);
 
   // A small opaque square on a transparent canvas — big enough for
   // trimDesign()'s trim() step (which needs a real content bounding box,
@@ -35,7 +41,7 @@ async function main() {
     backLayout: "upper-back",
     priceCents: 1000,
     quantity: 1,
-    variant: { size: "M", color: "Black" },
+    variant: { size: "M", color },
     customer: createOrder ? {
       name: "Junie Test",
       email: "test@example.com",

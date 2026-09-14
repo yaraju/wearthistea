@@ -48,6 +48,11 @@ export async function realizeDesign(designId: string, parent?: any) {
   let finalDesignB64 = "";
   let fullPrompt = "";
   const finalStatus = "generated";
+  // Falls back to the pre-existing variantColor for the (legacy) SVG
+  // rasterization path below, which doesn't call renderConceptArt and so
+  // never resolves a fresh color — see the `useImageModel` branch below for
+  // the real (raster/image-model) path, which always overwrites this.
+  let resolvedVariantColor = design.variantColor || settings.printify.defaultColor;
 
   try {
     if (useImageModel) {
@@ -65,17 +70,20 @@ export async function realizeDesign(designId: string, parent?: any) {
       // recomputes this itself from `concept` rather than taking it as input.
       fullPrompt = concept.artStyle === "svg" ? prompts.designImageArtOnly(concept) : prompts.designImage(concept);
 
-      // NOTE: renderConceptArt() now resolves its own garment color from the
-      // actual rendered art (self-reported by the model, or a luminance
-      // fallback — see prompts.ts's GARMENT_COLOR_CHOICE and gemini.ts's
+      // renderConceptArt() resolves its own garment color from the actual
+      // rendered art (self-reported by the model, or a luminance fallback —
+      // see prompts.ts's GARMENT_COLOR_CHOICE and gemini.ts's
       // resolveGarmentColor()) rather than obeying `concept.color` as an
-      // instruction. This path (a buyer re-realizing at a DIFFERENT checkout
-      // garment color, or a legacy "preview" row) still threads the
-      // pre-existing `design.variantColor` through to the downstream mockup
-      // and back-print steps below unchanged — reconciling that with
-      // whatever color this render actually resolves to is out of scope
-      // for this change (see issue #15).
-      finalDesignB64 = (await renderConceptArt(concept, observation)).imageB64;
+      // instruction — same as design-render.ts's fresh-generation path.
+      // Previously this discarded that resolved color and kept using the
+      // pre-existing (possibly stale/forced) `design.variantColor` for the
+      // mockup composite and back-print ink below, which could produce a
+      // mismatch between the actually-rendered art and what got shipped to
+      // Printrove — see #23. Now captured and used for both, and persisted
+      // below, exactly like a fresh generation.
+      const rendered = await renderConceptArt(concept, observation);
+      finalDesignB64 = rendered.imageB64;
+      resolvedVariantColor = rendered.variantColor;
     } else {
       // Legacy: high-res rasterization of previously stored vector data.
       const svgObservation = observation.span({ name: "svgToPng-highres" });
@@ -96,10 +104,7 @@ export async function realizeDesign(designId: string, parent?: any) {
     let productPreviewImagePath = design.productPreviewImagePath;
     if (settings.images.generateProductShot) {
       try {
-        const productB64 = await compositeOnTee(
-          finalDesignB64,
-          design.variantColor || settings.printify.defaultColor
-        );
+        const productB64 = await compositeOnTee(finalDesignB64, resolvedVariantColor);
         const saved = await saveImageWithPreview(design.batchId, `${design.id}-product-final.png`, productB64);
         productImagePath = saved.path;
         productPreviewImagePath = saved.previewPath;
@@ -118,7 +123,7 @@ export async function realizeDesign(designId: string, parent?: any) {
       try {
         const backB64 = await renderBackDesignArtwork(design.backPhrase, {
           layout: (design.backLayout as BackLayout) || "upper-back",
-          color: design.variantColor || settings.printify.defaultColor,
+          color: resolvedVariantColor,
         });
         const saved = await saveImageWithPreview(design.batchId, `${design.id}-back-final.png`, backB64);
         backDesignImagePath = saved.path;
@@ -145,6 +150,11 @@ export async function realizeDesign(designId: string, parent?: any) {
         // See the identical comment in /api/generate/retry — only needed as
         // a lost-file fallback when GCS isn't configured.
         designImageData: hasDurableStorage ? null : finalDesignB64,
+        // Persist whatever color this render actually resolved to (or, for
+        // the legacy SVG path, the pre-existing value) — see #23: this used
+        // to stay at whatever checkout had just force-written, which could
+        // disagree with the art/back-print that were just rendered above.
+        variantColor: resolvedVariantColor,
         status: finalStatus,
         // Keep designPrompt replayable: for the raster path, store the exact
         // prompt that produced this art (so a later retry reproduces it);

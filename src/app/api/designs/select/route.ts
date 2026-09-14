@@ -105,16 +105,21 @@ export async function POST(req: Request) {
   }
 
   // Realize (or re-realize) when: this is a legacy row that never got past
-  // Stage 1 preview, or the buyer picked a different garment color at
-  // checkout than the one the art was actually generated for — designImage()
-  // picks ink color (light-on-dark vs dark-on-light) from the garment color,
-  // so a color change can otherwise ship art that's invisible on the tee.
+  // Stage 1 preview, or `body.color` disagrees with the design's own
+  // self-reported variantColor. Garment color is no longer a checkout-time
+  // pick (see #10/#5) — PickDesignModal always sends design.variantColor
+  // back to us, so `colorChanged` should normally be false; this is a
+  // defensive check for a stale/tampered client, not the primary path.
   const colorChanged = Boolean(design.variantColor) && design.variantColor !== body.color;
   if (design.status !== "generated" || colorChanged) {
     try {
-      // variantColor is generation content (what the art was rendered
-      // against), not order content — still updated here since the buyer's
-      // color choice is what realizeDesign() needs to re-render correctly.
+      // Pre-set as a best-effort "last known intent" in case realizeDesign()
+      // throws before completing — it does NOT feed the re-render itself
+      // (renderConceptArt self-chooses the garment color from the art, same
+      // as fresh generation; see prompts.ts's GARMENT_COLOR_CHOICE). Once
+      // realizeDesign() succeeds it overwrites this with whatever color the
+      // re-render actually resolved to, which is also what drives that
+      // render's own product-shot/back-print ink — see realize.ts and #23.
       await prisma.design.update({
         where: { id: body.designId },
         data: { variantColor: body.color },

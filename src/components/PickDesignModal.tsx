@@ -146,7 +146,13 @@ export default function PickDesignModal({
         designId: design.id,
         category,
         size,
-        color: "Black",
+        // Garment color is no longer a checkout-time pick (see #10/#5) — it's
+        // self-reported/judge-validated per Design (variantColor) at brew
+        // time, and design-products.ts / the pick-modal preview above already
+        // follow it. Sending anything other than the design's own color here
+        // used to force a recolor-and-re-render at /api/designs/select
+        // (colorChanged) that discarded the correct self-report — see #23.
+        color: design.variantColor || "Black",
         quantity: Number(quantity) || 1,
         paymentMethod: wantsPrepaid ? "prepaid" : "cod",
       };

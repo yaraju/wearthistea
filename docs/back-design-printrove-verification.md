@@ -167,3 +167,84 @@ succeeded, 43 hit `RESOURCE_EXHAUSTED` (Gemini prepaid credits depleted, not
 a rate limit); retried after topping up credits — all 43 succeeded on
 retry. Final state confirmed against the real bucket: 0 designs missing
 full-res art, 0 missing previews.
+
+## 2026-09-15 — White-garment fulfillment support (#5), not a geometry change
+
+`design-products.ts` (the real-PrintRove preview-product builder) hardcoded
+`const COLOR = "Black"` — every design's PrintRove product/mockup was built
+in Black regardless of what garment color the art was self-reported/judge-
+validated for (`Design.variantColor`, since #10). Fixed to always follow
+`design.variantColor` (falling back to `"Black"` only for a genuine legacy
+row with no self-reported color yet).
+
+### White variant ids — read live from `GET /api/product/{id}`
+
+`settings.ts`'s `variantMap` only had `Black|<size>` entries; confirmed live
+that White variants exist for every size already offered, for all four
+categories, and added them:
+
+| Category | Product ID | White variant ids (by size) |
+|---|---|---|
+| Men's | 460 | S=264, M=265, L=266, XL=267 |
+| Women's | 462 | XS=375, S=373, M=372, L=371, XL=374 |
+| Toddler | 560 | 1=637, 2=645, 3=653, 4=661 |
+| Kids | 561 | 8=677, 10=685, 12=693, 14=701 |
+
+(Confirmed via `getProductWithVariants()` against the live catalog — same
+method this doc's "How to re-verify" section already describes. Not a
+placement/geometry change: `frame`/print-area values are unchanged, White
+just reuses the same frame as Black.)
+
+### End-to-end `fulfill()` path for White — confirmed live
+
+`scripts/test-fulfillment.ts` gained a `--color=` flag for this issue (#5) —
+defaults to `Black` (unchanged existing behavior), pass `--color=White` to
+exercise a non-Black variant. Ran both, no `--order` on either:
+
+- `npx tsx scripts/test-fulfillment.ts` → product **880539** (Black
+  baseline, confirms nothing broke).
+- `npx tsx scripts/test-fulfillment.ts --color=White` → product **880541**
+  (White; an earlier ad-hoc run before the script had `--color` produced
+  **880540**, same result, superseded by this reproducible one).
+- Polled `GET /products/880541` until `mockup.front_mockup`/`back_mockup`
+  populated: filenames were `front-6aa84e2bba75a-White_M_Men_Round.jpg` /
+  `back-...-White_M_Men_Round.jpg` — PrintRove's own naming confirms the
+  White variant was actually used, not silently forced to Black.
+- Downloaded both 880540's mockups and visually confirmed a genuine white
+  garment (not Black or PrintRove's blank default) with the test art
+  composited on front and back.
+
+### Back-print ink flip for White — confirmed deterministically
+
+`renderBackDesignArtwork()`'s ink color depends only on `isDarkGarment(color)`
+(`"white"` is not in `DARK_GARMENT_COLORS`, so it resolves to the same
+`#111111` dark-ink branch used for every other light garment) — rendered the
+real payoff line for both colors and measured mean luminance of the
+non-transparent ink pixels: Black → 242.9 (light ink, as before), White →
+34.3 (dark ink). Confirms the flip is correct without needing a further live
+PrintRove mockup poll for this part (deterministic Satori/sharp compositing,
+no LLM call — same reasoning as the 2026-09-12 entry above for why this
+doesn't need a fresh catalog re-check).
+
+### Checkout-path bug (#23) — partially fixed here, see issue #5's comment
+
+`PickDesignModal.tsx` hardcoded `color: "Black"` in the checkout payload,
+which forced `/api/designs/select` to recolor+re-render every White design
+back to Black at the moment a customer actually tried to buy it — meaning
+this fix alone wouldn't have closed the loop for a real order. Fixed
+`PickDesignModal.tsx` to send the design's own `variantColor` instead (color
+is self-reported now, not a checkout-time pick), and fixed `realize.ts`'s
+re-render path to capture and persist whatever color `renderConceptArt()`
+actually resolves to (previously discarded, so the checkout-time re-render's
+product-shot/back-print ink could silently disagree with the freshly
+rendered front art — see #23's root-cause analysis). Real *order* placement
+against a White product was left for manual validation per this issue's
+scope — see the issue #5 comment for the full breakdown.
+
+### Test products created this session (kept intentionally)
+
+| Product ID | Category | Purpose | Color |
+|---|---|---|---|
+| 880539 | Men's/M | Black baseline, confirms nothing broke | Black |
+| 880540 | Men's/M | White-variant fulfillment, ad-hoc pre-`--color` run | White |
+| 880541 | Men's/M | White-variant fulfillment, reproducible via `--color=White` | White |
