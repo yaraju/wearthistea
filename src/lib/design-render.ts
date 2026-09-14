@@ -35,6 +35,12 @@ export async function renderDesignArtwork(
   trace: LangfuseTraceClient,
   rateLimit: RateLimitResult
 ) {
+  // `color` is intentionally omitted here — garment color is no longer a
+  // caller-supplied instruction (see prompts.ts's GARMENT_COLOR_CHOICE):
+  // renderConceptArt() below resolves it FROM the actual rendered pixels
+  // (the model's own self-report, or a luminance fallback) and returns it
+  // alongside the image, so it's written to `Design.variantColor` for the
+  // first time right after this, not read from it beforehand.
   const concept: Concept = {
     title: design.title,
     phrase: design.phrase,
@@ -42,13 +48,15 @@ export async function renderDesignArtwork(
     vibe: design.vibe ?? undefined,
     blurb: design.blurb ?? undefined,
     backPhrase: design.backPhrase || "",
-    color: design.variantColor || settings.printify.defaultColor,
     artStyle: design.style === "svg" ? "svg" : "raster",
   };
 
   let designB64: string;
+  let variantColor: string;
   try {
-    designB64 = await renderConceptArt(concept, trace);
+    const rendered = await renderConceptArt(concept, trace);
+    designB64 = rendered.imageB64;
+    variantColor = rendered.variantColor;
     await recordGenerateUsage(rateLimit);
   } catch (err) {
     // Gemini's own 429/503 (its quota/capacity, not ours) isn't the
@@ -68,10 +76,7 @@ export async function renderDesignArtwork(
   let productPreviewImagePath = design.productPreviewImagePath;
   if (settings.images.generateProductShot) {
     try {
-      const productB64 = await compositeOnTee(
-        designB64,
-        design.variantColor || settings.printify.defaultColor
-      );
+      const productB64 = await compositeOnTee(designB64, variantColor);
       const saved = await saveImageWithPreview(design.batchId, `${base}-product.png`, productB64);
       productImagePath = saved.path;
       productPreviewImagePath = saved.previewPath;
@@ -92,7 +97,7 @@ export async function renderDesignArtwork(
     try {
       const backB64 = await renderBackDesignArtwork(design.backPhrase, {
         layout: (design.backLayout as BackLayout) || "upper-back",
-        color: design.variantColor || settings.printify.defaultColor,
+        color: variantColor,
       });
       const saved = await saveImageWithPreview(design.batchId, `${base}-back.png`, backB64);
       backDesignImagePath = saved.path;
@@ -116,6 +121,9 @@ export async function renderDesignArtwork(
       // persisted this or threw, so storing a second copy here would just
       // be permanent, ever-growing database bloat for no benefit.
       designImageData: hasDurableStorage ? null : designB64,
+      // First write of variantColor for a fresh design — resolved from the
+      // actual rendered art (see renderConceptArt), not chosen upfront.
+      variantColor,
       status: "generated",
       errorMessage: null,
     },

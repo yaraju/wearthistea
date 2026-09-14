@@ -183,10 +183,11 @@ export default function KeywordStudio() {
   const [preBrewed, setPreBrewed] = useState<DesignMatchDTO[]>([]);
   // Apparel type is no longer a brew-time choice (see the plan doc — one
   // design now generates once and gets a Printrove preview product per
-  // category, picked at "select this design" time instead). Color stays
-  // here since it genuinely affects generation (ink-contrast direction).
-  const [colors, setColors] = useState<string[]>(["Black"]);
-  const [selectedColor, setSelectedColor] = useState("Black");
+  // category, picked at "select this design" time instead). Garment color
+  // is likewise no longer picked upfront — the image-generation call itself
+  // chooses black or white for the strongest ink contrast and self-reports
+  // it, resolved server-side into Design.variantColor once each design's
+  // render lands (see prompts.ts's GARMENT_COLOR_CHOICE).
   const [style, setStyle] = useState<"raster" | "svg">("raster");
   const [examples, setExamples] = useState<string[]>([]);
   const reduce = useReducedMotion();
@@ -243,16 +244,6 @@ export default function KeywordStudio() {
   useEffect(() => stopPolling, []);
 
   useEffect(() => {
-    fetch("/api/catalog")
-      .then(res => res.json())
-      .then((data: { colors: string[] }) => {
-        if (data.colors?.length > 0) {
-          setColors(data.colors);
-          setSelectedColor(data.colors.includes("Black") ? "Black" : data.colors[0]);
-        }
-      })
-      .catch(err => console.error("Failed to fetch catalog", err));
-
     fetch("/api/gossip-examples")
       .then(res => res.json())
       .then(data => {
@@ -329,10 +320,9 @@ export default function KeywordStudio() {
         body: JSON.stringify({
           keyword: tea,
           // No productId/category/productType — apparel type is a pick-time
-          // choice now. The server defaults category to "men" purely as
-          // flavor text in the render prompt ("printed on a Black T-shirt");
-          // it no longer determines what's actually sellable.
-          color: selectedColor,
+          // choice now. No color either — garment color is no longer picked
+          // upfront; the image-generation call itself chooses it (see
+          // prompts.ts's GARMENT_COLOR_CHOICE).
           style
         }),
       });
@@ -415,25 +405,6 @@ export default function KeywordStudio() {
       <div className="sticker sticker-pink rounded-2xl bg-paper-2 p-2 sm:p-3">
         <div className="flex flex-col gap-3">
           <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
-            <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-initial">
-              <label htmlFor="color-select" className="px-2 font-mono text-xs font-bold uppercase tracking-wider text-ink-soft">
-                Color
-              </label>
-              <select
-                id="color-select"
-                name="color-select"
-                className="w-full rounded-xl bg-paper-1 px-4 py-3 font-mono text-sm text-ink focus:outline-none"
-                value={selectedColor}
-                onChange={(e) => setSelectedColor(e.target.value)}
-              >
-                {colors.map((color) => (
-                  <option key={color} value={color}>
-                    {color}
-                  </option>
-                ))}
-              </select>
-            </div>
-
             <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-initial">
               <label htmlFor="style-select" className="px-2 font-mono text-xs font-bold uppercase tracking-wider text-ink-soft">
                 Art Style
@@ -578,7 +549,6 @@ export default function KeywordStudio() {
                     index={i}
                     reduce={reduce}
                     onRetry={retryDesign}
-                    selectedColor={selectedColor}
                   />
                 ))}
               </div>
@@ -601,7 +571,7 @@ export default function KeywordStudio() {
             </div>
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
               {preBrewed.map((m, i) => (
-                <PreBrewedCard key={m.id} match={m} index={i} reduce={reduce} selectedColor={selectedColor} />
+                <PreBrewedCard key={m.id} match={m} index={i} reduce={reduce} />
               ))}
             </div>
           </div>
@@ -649,13 +619,11 @@ function DesignCard({
   index,
   reduce,
   onRetry,
-  selectedColor,
 }: {
   design: DesignDTO;
   index: number;
   reduce: boolean | null;
   onRetry?: (id: string) => void;
-  selectedColor: string;
 }) {
   const [status, setStatus] = useState(design.status);
   const [open, setOpen] = useState(false);
@@ -670,6 +638,13 @@ function DesignCard({
   // the browser.
   const img = design.designPreviewImagePath || design.productPreviewImagePath;
 
+  // Garment color is no longer picked upfront — it's resolved server-side
+  // from the actual rendered art (see prompts.ts's GARMENT_COLOR_CHOICE) and
+  // lands on design.variantColor once the render completes. Until then (or
+  // for a legacy row that somehow never got one), show a transparency
+  // checkerboard instead of guessing a color.
+  const swatchColor = design.variantColor ? getColorCode(design.variantColor) : null;
+
   return (
     <motion.figure
       initial={reduce ? false : { opacity: 0, y: 14 }}
@@ -680,8 +655,10 @@ function DesignCard({
       }`}
     >
       <div
-        className="relative flex aspect-[4/5] items-center justify-center overflow-hidden p-5"
-        style={{ backgroundColor: getColorCode(selectedColor) }}
+        className={`relative flex aspect-[4/5] items-center justify-center overflow-hidden p-5 ${
+          swatchColor ? "" : "alpha-grid"
+        }`}
+        style={swatchColor ? { backgroundColor: swatchColor } : undefined}
       >
         <AnimatePresence mode="sync">
           {img ? (
@@ -800,12 +777,10 @@ function PreBrewedCard({
   match,
   index,
   reduce,
-  selectedColor,
 }: {
   match: DesignMatchDTO;
   index: number;
   reduce: boolean | null;
-  selectedColor: string;
 }) {
   const [design, setDesign] = useState<DesignDTO | null>(null);
   const [loading, setLoading] = useState(false);
@@ -841,8 +816,10 @@ function PreBrewedCard({
       className="sticker group flex flex-col overflow-hidden rounded-2xl bg-paper-2"
     >
       <div
-        className="relative flex aspect-[4/5] items-center justify-center overflow-hidden p-5"
-        style={{ backgroundColor: getColorCode(match.variantColor || selectedColor) }}
+        className={`relative flex aspect-[4/5] items-center justify-center overflow-hidden p-5 ${
+          match.variantColor ? "" : "alpha-grid"
+        }`}
+        style={match.variantColor ? { backgroundColor: getColorCode(match.variantColor) } : undefined}
       >
         {img ? (
           // eslint-disable-next-line @next/next/no-img-element

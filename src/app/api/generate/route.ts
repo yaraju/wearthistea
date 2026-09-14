@@ -50,7 +50,6 @@ const Body = z.object({
   productId: z.number().optional(),
   category: z.string().optional(),
   productType: z.string().optional(),
-  color: z.string().optional(),
   style: z.enum(["raster", "svg"]).optional().default("raster"),
 });
 
@@ -78,7 +77,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const { keyword, category, productType, color, style } = body;
+  const { keyword, category, productType, style } = body;
   const resolvedCategory = resolveCategory(body.productId);
 
   const traceId = getTraceId(req);
@@ -96,7 +95,6 @@ export async function POST(req: Request) {
 
   try {
     const count = settings.optionsPerKeyword;
-    const resolvedColor = color || settings.printify.defaultColor;
 
     // Stage 1a only: fast concept writing (a couple of seconds). Artwork for
     // each concept is rendered by a separate request per design (fired by the
@@ -105,12 +103,14 @@ export async function POST(req: Request) {
     // Firebase Hosting's unconfigurable ~60s rewrite-proxy timeout and comes
     // back as an HTML 502 the client can't parse as JSON. See the production
     // incident note in design-quality-improvement-plan.md.
-    const concepts = await generateConcepts(
-      keyword,
-      count,
-      { style, category, productType, color: resolvedColor },
-      trace
-    );
+    //
+    // No `color` here — garment color is no longer a brew-time choice (see
+    // prompts.ts's GARMENT_COLOR_CHOICE): the image-generation call itself
+    // picks black or white for the strongest ink contrast and self-reports
+    // it, resolved by renderConceptArt() once each design's render actually
+    // runs (dispatched below) and written to Design.variantColor then —
+    // never known at this row-creation point.
+    const concepts = await generateConcepts(keyword, count, { style, category, productType }, trace);
 
     const batchSpan = trace.span({ name: "create-batch-row" });
     const batch = await prisma.batch.create({ data: { keyword } }).catch((err) => {
@@ -134,13 +134,15 @@ export async function POST(req: Request) {
             backLayout: pickRandomBackLayout(),
             style,
             designPrompt: prompts.designImage(c),
-            productPrompt: `[mockup composite of clean design on ${resolvedColor} tee]`,
+            // Garment color isn't known yet — the render dispatched below
+            // resolves it from the actual art and writes Design.variantColor
+            // then (see design-render.ts's renderDesignArtwork).
+            productPrompt: `[mockup composite of clean design on tee — color resolved at render time]`,
             designImagePath: "",
             productImagePath: "",
             designPreviewImagePath: "",
             productPreviewImagePath: "",
             category: resolvedCategory,
-            variantColor: resolvedColor,
             status: "generating",
           },
         })

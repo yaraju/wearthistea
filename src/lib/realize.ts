@@ -58,7 +58,6 @@ export async function realizeDesign(designId: string, parent?: any) {
         vibe: design.vibe || undefined,
         blurb: design.blurb || undefined,
         backPhrase: design.backPhrase || "",
-        color: design.variantColor || settings.printify.defaultColor,
         artStyle: design.style === "svg" ? "svg" : "raster",
       };
 
@@ -66,7 +65,17 @@ export async function realizeDesign(designId: string, parent?: any) {
       // recomputes this itself from `concept` rather than taking it as input.
       fullPrompt = concept.artStyle === "svg" ? prompts.designImageArtOnly(concept) : prompts.designImage(concept);
 
-      finalDesignB64 = await renderConceptArt(concept, observation);
+      // NOTE: renderConceptArt() now resolves its own garment color from the
+      // actual rendered art (self-reported by the model, or a luminance
+      // fallback — see prompts.ts's GARMENT_COLOR_CHOICE and gemini.ts's
+      // resolveGarmentColor()) rather than obeying `concept.color` as an
+      // instruction. This path (a buyer re-realizing at a DIFFERENT checkout
+      // garment color, or a legacy "preview" row) still threads the
+      // pre-existing `design.variantColor` through to the downstream mockup
+      // and back-print steps below unchanged — reconciling that with
+      // whatever color this render actually resolves to is out of scope
+      // for this change (see issue #15).
+      finalDesignB64 = (await renderConceptArt(concept, observation)).imageB64;
     } else {
       // Legacy: high-res rasterization of previously stored vector data.
       const svgObservation = observation.span({ name: "svgToPng-highres" });

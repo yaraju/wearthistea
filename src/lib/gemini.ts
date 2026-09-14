@@ -1,6 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
+import sharp from "sharp";
 import { settings } from "@/config/settings";
-import { prompts, isDarkGarment, type Concept } from "@/config/prompts";
+import { prompts, type Concept } from "@/config/prompts";
 import { removeBgB64 } from "./background-removal";
 import { compositePhraseBand, PRINT_CANVAS_WIDTH, PRINT_CANVAS_HEIGHT, PRINT_TEXT_BAND_HEIGHT } from "./text-layer";
 import { langfuse } from "./langfuse";
@@ -91,7 +92,6 @@ export interface GenerateBatchOptions {
   style?: "raster" | "svg";
   category?: string;
   productType?: string;
-  color?: string;
 }
 
 /**
@@ -109,7 +109,7 @@ export async function generateConcepts(
   options: GenerateBatchOptions = {},
   parent?: any
 ): Promise<Concept[]> {
-  const { style = "raster", category, productType, color } = options;
+  const { style = "raster", category, productType } = options;
 
   if (!hasApiKey()) {
     // No Gemini key — return shuffled dummy concepts so the UI workflow completes.
@@ -118,7 +118,6 @@ export async function generateConcepts(
       artStyle: style,
       category,
       productType,
-      color,
       blurb: `[DEMO] ${c.blurb ?? ""}`.trim(),
     }));
   }
@@ -164,11 +163,14 @@ export async function generateConcepts(
 
   return concepts
     .slice(0, count)
-    .map((c) => ({ ...c, artStyle: style, category, productType, color }));
+    .map((c) => ({ ...c, artStyle: style, category, productType }));
 }
 
 export interface BatchItem extends Concept {
   imageB64?: string;
+  /** Garment color renderConceptArt() resolved this art for — unset when
+   * generation failed (error is set instead). */
+  variantColor?: "Black" | "White";
   error?: string;
 }
 
@@ -220,17 +222,31 @@ function createLimiter(concurrency: number) {
  * `runBgRemoval` lets a caller share a concurrency limiter across a batch of
  * parallel renders (ONNX background removal is the CPU/memory-heavy local
  * step); single-design callers can omit it.
+ *
+ * Garment color is no longer a caller-supplied instruction (see the removed
+ * isDarkGarment(c.color) pre-branch in prompts.ts) — the image call itself
+ * picks black or white for the strongest ink contrast and self-reports it
+ * (GARMENT_COLOR_CHOICE / COLOR_CHOICE line), resolved here by
+ * resolveGarmentColor() and returned alongside the pixels so the caller can
+ * persist it as `Design.variantColor` once it's actually known.
  */
+export interface RenderedConceptArt {
+  imageB64: string;
+  /** Garment color this art was resolved for — "Black" or "White". */
+  variantColor: "Black" | "White";
+}
+
 export async function renderConceptArt(
   concept: Concept,
   parent?: any,
   runBgRemoval: (fn: () => Promise<string>) => Promise<string> = (fn) => fn()
-): Promise<string> {
+): Promise<RenderedConceptArt> {
   const isSvgStyle = concept.artStyle === "svg";
   const genPrompt = isSvgStyle ? prompts.designImageArtOnly(concept) : prompts.designImage(concept);
 
-  let imageB64 = await generateImage(genPrompt, settings.gemini.imagenFastModel, parent);
+  const generated = await generateImage(genPrompt, settings.gemini.imagenFastModel, parent);
 
+  let imageB64 = generated.imageB64;
   try {
     imageB64 = await runBgRemoval(() => removeBgB64(imageB64));
   } catch {
@@ -239,14 +255,84 @@ export async function renderConceptArt(
     // over this local step.
   }
 
-  if (!isSvgStyle) return imageB64;
+  const variantColor = await resolveGarmentColor(generated.text, imageB64);
 
-  return compositePhraseBand(imageB64, concept.phrase, {
+  if (!isSvgStyle) return { imageB64, variantColor };
+
+  const composed = await compositePhraseBand(imageB64, concept.phrase, {
     canvasWidth: PRINT_CANVAS_WIDTH,
     canvasHeight: PRINT_CANVAS_HEIGHT,
     bandHeight: PRINT_TEXT_BAND_HEIGHT,
-    color: isDarkGarment(concept.color || "Black") ? "#ffffff" : "#111111",
+    color: variantColor === "Black" ? "#ffffff" : "#111111",
   });
+  return { imageB64: composed, variantColor };
+}
+
+/**
+ * Strict token the designImage()/designImageArtOnly() prompts instruct the
+ * model to end its response with (see GARMENT_COLOR_CHOICE in prompts.ts).
+ * Matched against a whole line (^...$ with /m) so stray surrounding prose
+ * can't produce a false match.
+ */
+const COLOR_CHOICE_RE = /^COLOR_CHOICE:\s*(black|white)\s*$/im;
+
+/**
+ * Mean-luminance fallback for when the image call's text response is
+ * missing or doesn't carry a parseable COLOR_CHOICE line (the Imagen path
+ * never returns text at all; the flash-image model occasionally drops the
+ * line). Measures the actual non-transparent ink pixels of the rendered
+ * art: light ink implies it was drawn to read on a black garment, dark ink
+ * implies white — deterministic given the same pixels, so this stays
+ * self-consistent with what's actually on screen even without the model's
+ * own self-report.
+ */
+export async function resolveGarmentColorFromLuminance(imageB64: string): Promise<"Black" | "White"> {
+  const { data, info } = await sharp(Buffer.from(imageB64, "base64"))
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  const channels = info.channels;
+  let sum = 0;
+  let count = 0;
+  for (let i = 0; i < data.length; i += channels) {
+    const alpha = data[i + 3];
+    if (alpha < 16) continue; // skip transparent/near-transparent pixels — not ink
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    sum += 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    count++;
+  }
+
+  // No ink pixels found at all (e.g. a fully transparent/blank render) —
+  // default to Black, matching the old isDarkGarment() default.
+  if (count === 0) return "Black";
+
+  const meanLuminance = sum / count;
+  // Light ink (high mean luminance) was drawn to read on a dark garment;
+  // dark ink (low mean luminance) was drawn to read on a light garment.
+  return meanLuminance > 127.5 ? "Black" : "White";
+}
+
+/**
+ * Resolve which garment color (Black/White) an image-generation call's art
+ * was rendered for. Prefers the model's own explicit COLOR_CHOICE
+ * self-report; falls back to resolveGarmentColorFromLuminance() when that
+ * line is missing or malformed. Exported standalone (not inlined into
+ * renderConceptArt) so it's directly unit-testable against fixture
+ * text/images without a live Gemini call — see
+ * scripts/test-color-resolution.ts.
+ */
+export async function resolveGarmentColor(
+  text: string | undefined,
+  imageB64: string
+): Promise<"Black" | "White"> {
+  const match = text?.match(COLOR_CHOICE_RE);
+  if (match) {
+    return match[1].toLowerCase() === "black" ? "Black" : "White";
+  }
+  return resolveGarmentColorFromLuminance(imageB64);
 }
 
 /**
@@ -289,8 +375,8 @@ export async function generateBatch(
     const items: BatchItem[] = await Promise.all(
       concepts.map(async (c) => {
         try {
-          const imageB64 = await renderConceptArt(c, observation, limitBgRemoval);
-          return { ...c, imageB64 };
+          const { imageB64, variantColor } = await renderConceptArt(c, observation, limitBgRemoval);
+          return { ...c, imageB64, variantColor };
         } catch (err) {
           const error = err instanceof Error ? err.message : String(err);
           return { ...c, imageB64: "", error };
@@ -346,7 +432,16 @@ export async function generateGossipExamples(): Promise<string[]> {
  * Auto-routes: "imagen*" models use the Images API; everything else uses the
  * Gemini native image output (Nano Banana family).
  */
-export async function generateImage(prompt: string, modelOverride?: string, parent?: any): Promise<string> {
+export interface GeneratedImage {
+  imageB64: string;
+  /** Any accompanying text part from the model's response — this is where
+   * the designImage()/designImageArtOnly() COLOR_CHOICE self-report line
+   * lands. Undefined for the Imagen path (generateImages never returns
+   * text) and for the no-API-key placeholder path. */
+  text?: string;
+}
+
+export async function generateImage(prompt: string, modelOverride?: string, parent?: any): Promise<GeneratedImage> {
   const observation = (parent || langfuse).generation({
     name: "generateImage",
     model: modelOverride || settings.gemini.imageModel,
@@ -356,7 +451,7 @@ export async function generateImage(prompt: string, modelOverride?: string, pare
   if (!hasApiKey()) {
     // No Gemini key — return a 1×1 transparent placeholder so the pipeline completes.
     observation.end({ output: DUMMY_PNG_B64 });
-    return DUMMY_PNG_B64;
+    return { imageB64: DUMMY_PNG_B64 };
   }
 
   const model = modelOverride || settings.gemini.imageModel;
@@ -371,26 +466,35 @@ export async function generateImage(prompt: string, modelOverride?: string, pare
       const b64 = res.generatedImages?.[0]?.image?.imageBytes;
       if (!b64) throw new Error(`Imagen model "${model}" returned no image.`);
       observation.end({ output: "[image bytes]" });
-      return b64;
+      return { imageB64: b64 };
     }
 
+    // TEXT is requested alongside IMAGE so the model can self-report which
+    // garment color (black/white) it chose for the strongest ink contrast —
+    // see GARMENT_COLOR_CHOICE in prompts.ts and resolveGarmentColor() above.
     const res = await ai().models.generateContent({
       model,
       contents: [{ role: "user", parts: [{ text: prompt }] }],
-      config: { responseModalities: ["IMAGE"] },
+      config: { responseModalities: ["TEXT", "IMAGE"] },
     });
 
     const parts = res.candidates?.[0]?.content?.parts ?? [];
+    let imageB64: string | undefined;
+    let text = "";
     for (const part of parts) {
-      if (part.inlineData?.data) {
-        observation.end({ output: "[image data]" });
-        return part.inlineData.data;
-      }
+      if (part.inlineData?.data && !imageB64) imageB64 = part.inlineData.data;
+      if (part.text) text += part.text;
     }
-    throw new Error(
-      `Image model "${model}" returned no image data. ` +
-        `If this model isn't enabled on your key, set GEMINI_IMAGE_MODEL to one that is.`
-    );
+
+    if (!imageB64) {
+      throw new Error(
+        `Image model "${model}" returned no image data. ` +
+          `If this model isn't enabled on your key, set GEMINI_IMAGE_MODEL to one that is.`
+      );
+    }
+
+    observation.end({ output: { image: "[image data]", text } });
+    return { imageB64, text: text || undefined };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     observation.end({ level: "error", statusMessage: message });

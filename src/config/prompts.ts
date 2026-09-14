@@ -29,7 +29,11 @@ export interface Concept {
   backPhrase: string;
   category?: string;
   productType?: string;
-  color?: string;
+  // NOTE: no `color` field — garment color is no longer a caller-supplied
+  // instruction fed into designImage()/designImageArtOnly() (see
+  // GARMENT_COLOR_CHOICE below). It's resolved AFTER rendering from the
+  // actual pixels (gemini.ts's renderConceptArt/resolveGarmentColor), never
+  // known upfront.
   // Rendering direction for designImage(): "raster" = bold editorial
   // illustration, "svg" = minimalist single-color vector line art. Both are
   // rendered by the image model — this only changes the STYLE instruction.
@@ -54,6 +58,38 @@ const DARK_GARMENT_COLORS = new Set(["black", "navy", "charcoal"]);
  * disagree about which way this goes.
  */
 export const isDarkGarment = (color: string) => DARK_GARMENT_COLORS.has((color || "Black").toLowerCase());
+
+/**
+ * Shared instruction block for designImage()/designImageArtOnly(): garment
+ * color is no longer picked upfront by the caller (see the removed
+ * isDarkGarment(c.color) pre-branch this replaced) — the image call itself
+ * decides which of black/white gives its own ink the strongest contrast and
+ * self-reports that choice as a trailing text line. Coupling the color
+ * decision to the actual pixels produced is structurally more
+ * self-consistent than an externally-imposed instruction the model could
+ * ignore or contradict. The caller (renderConceptArt in gemini.ts) parses
+ * this token via a strict regex, falling back to a luminance check on the
+ * actual ink pixels if it's missing or malformed.
+ */
+const GARMENT_COLOR_CHOICE = `
+GARMENT COLOR — YOU DECIDE:
+This artwork will be printed on a garment that is either solid BLACK or
+solid WHITE — nobody has picked which yet, that decision is yours. Choose
+whichever of the two gives the ink colors you actually draw with the
+strongest, cleanest contrast (bright white/neon/pastel ink typically reads
+best on black; black/deep saturated ink typically reads best on white), then
+render the entire piece consistently for that one choice — never mix
+light-on-dark and dark-on-light within the same design.
+
+MANDATORY RESPONSE FORMAT: after producing the image, output one line of
+plain text — not part of the image, the literal last thing in your response,
+nothing else on that line — in exactly this format:
+COLOR_CHOICE: black
+or
+COLOR_CHOICE: white
+(lowercase, matching whichever garment color you actually designed for).
+Always include this line, every time.
+`.trim();
 
 /** Shared brand voice. */
 const BRAND_VOICE = `
@@ -261,7 +297,7 @@ JSON format:
 Create a single isolated PRINT GRAPHIC — the ink artwork ITSELF, floating alone
 on a transparent background. This is NOT a picture of a shirt, NOT a mockup,
 NOT a product photo — it is only the illustration and lettering that will
-later be printed onto the chest of a ${c.color || "Black"} ${c.productType || "T-shirt"} (${c.category || "Clothing"}) by a separate process.
+later be printed onto the chest of a ${c.productType || "T-shirt"} (${c.category || "Clothing"}) by a separate process.
 
 CRITICAL — READ THIS TWICE: the image must contain ONLY the illustration and
 text described below, nothing else. It must NOT contain any part of a
@@ -274,10 +310,7 @@ at all, that is wrong and must not happen. Also no model, wall, studio,
 paper, sticker, shadow, floor, or background scene of any kind. Crop tight
 to the illustration and text only, isolated on transparent alpha.
 
-${isDarkGarment(c.color || "Black")
-  ? "IMPORTANT: The t-shirt color is DARK. Use bright, high-contrast colors (white, neons, pastels) so the design is visible."
-  : "IMPORTANT: The t-shirt color is LIGHT. Use dark, high-contrast colors (black, deep blues, rich reds) so the design is visible."
-}
+${GARMENT_COLOR_CHOICE}
 
 ${PRINT_SPECS}
 
@@ -330,7 +363,7 @@ ${ART_RULES}
 Create a single isolated PRINT ILLUSTRATION — the ink artwork ITSELF, floating
 alone on a transparent background. This is NOT a picture of a shirt, NOT a
 mockup, NOT a product photo — it is only the scene described below, ready to
-be printed onto the chest of a ${c.color || "Black"} ${c.productType || "T-shirt"} by a separate process.
+be printed onto the chest of a ${c.productType || "T-shirt"} by a separate process.
 
 CRITICAL — READ THIS TWICE: the image must contain ONLY the illustration
 described below, nothing else. It must NOT contain any part of a garment
@@ -343,10 +376,7 @@ wrong and must not happen. Also no model, wall, studio, paper, sticker,
 shadow, floor, or background scene of any kind. Crop tight to the
 illustration only, isolated on transparent alpha.
 
-${isDarkGarment(c.color || "Black")
-  ? "IMPORTANT: The t-shirt color is DARK. Use bright, high-contrast colors (white, neons, pastels) so the illustration is visible."
-  : "IMPORTANT: The t-shirt color is LIGHT. Use dark, high-contrast colors (black, deep blues, rich reds) so the illustration is visible."
-}
+${GARMENT_COLOR_CHOICE}
 
 HARD CONSTRAINT — READ THIS TWICE: this illustration must contain ZERO
 typography of any kind. No text, letters, numbers, words, captions, titles,
