@@ -121,6 +121,58 @@ export async function readImageAsBase64(publicPath: string): Promise<string> {
   }
 }
 
+/**
+ * Whether a public /generated/... path resolves to a REAL object in GCS —
+ * not merely a truthy path string, and not the local-disk fallback. Lifted
+ * from the ad-hoc `file.exists()` pattern in
+ * scripts/migrate-design-image-data-to-gcs.ts:56 into a reusable export so
+ * every integrity check (issue #17) goes through identical logic instead of
+ * each caller re-deriving the relPath-stripping and exists() call.
+ *
+ * Returns false — never throws — when there's no bucket to check against
+ * (GCS_BUCKET unset, matching this module's own local-disk-fallback
+ * decision) or when publicPath doesn't reduce to a real relative path. This
+ * is deliberate: a path that's "only ever on local disk" and a path that's
+ * unset/malformed are both "not durably stored", which is exactly the
+ * distinction this helper exists to make (see AGENTS.md's GCS_BUCKET
+ * gotcha — a caller must pass GCS_BUCKET explicitly to actually check the
+ * real bucket; with it unset this always reports false, never local state
+ * dressed up as a real check).
+ *
+ * `opts.bucket`/`opts.client` override the module-level bucket name/Storage
+ * instance — lets tests exercise "object present", "object absent", and
+ * "bucket unset" against a mocked client without needing real GCS
+ * credentials or fighting this module's import-time env capture. `client`
+ * only needs to be shaped like the bucket()/file()/exists() slice actually
+ * used here (GcsClientLike), not a full Storage instance — the real
+ * @google-cloud/storage Storage satisfies it structurally, and a test mock
+ * doesn't need to stub the other 60+ Bucket/File methods it never calls.
+ */
+export interface GcsClientLike {
+  bucket: (name: string) => {
+    file: (relPath: string) => { exists: () => Promise<[boolean]> };
+  };
+}
+
+export async function existsInGcs(
+  publicPath: string,
+  opts: {
+    bucket?: string;
+    client?: GcsClientLike;
+  } = {}
+): Promise<boolean> {
+  const bucketName = opts.bucket ?? GCS_BUCKET;
+  const client = opts.client ?? storage;
+  if (!bucketName || !client) return false;
+
+  const relPath = publicPath.replace(/^\/generated\/?/, "");
+  if (!relPath) return false;
+
+  const file = client.bucket(bucketName).file(relPath);
+  const [exists] = await file.exists();
+  return exists;
+}
+
 /** Get the file content and type for serving via route handler. */
 export async function getFile(relPath: string): Promise<{ data: Uint8Array; contentType: string }> {
   const ext = path.extname(relPath).toLowerCase();

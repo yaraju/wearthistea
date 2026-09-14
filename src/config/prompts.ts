@@ -91,8 +91,12 @@ COLOR_CHOICE: white
 Always include this line, every time.
 `.trim();
 
-/** Shared brand voice. */
-const BRAND_VOICE = `
+/** Shared brand voice. Exported (not just module-private) so the bulk
+ * style-alignment re-check (design-judge-bulk.ts, issue #17) can feed the
+ * EXACT same rule text into its judge prompt instead of a hand-copied
+ * paraphrase that could silently drift out of sync with what generation
+ * actually enforces. */
+export const BRAND_VOICE = `
 You are the lead designer for wearthistea.com, a streetwear brand that turns
 internet gossip, online drama, messy group-chat energy, and "tea" into witty,
 original t-shirt designs.
@@ -105,8 +109,9 @@ defamatory claims. The joke should punch at the situation, the hypocrisy, the
 awkwardness, or the meme logic — not at protected traits, trauma, or identity.
 `.trim();
 
-/** Concept-writing rules. */
-const CONCEPT_RULES = `
+/** Concept-writing rules. Exported for the same reason as BRAND_VOICE above
+ * — see design-judge-bulk.ts's checkStyleAlignment(). */
+export const CONCEPT_RULES = `
 CONCEPT RULES:
 - Each concept must feel like a real t-shirt someone would buy, not just a caption.
 - The phrase is the main chest text: short, punchy, memorable, and easy to read.
@@ -124,8 +129,10 @@ CONCEPT RULES:
 - backPhrase target: 2–8 words, under 48 characters, plain ASCII, same tone as BRAND_VOICE. No emojis, hashtags, or symbols.
 `.trim();
 
-/** Legal and print guardrails reused inside image prompts. */
-const ART_RULES = `
+/** Legal and print guardrails reused inside image prompts. Exported for the
+ * same reason as BRAND_VOICE/CONCEPT_RULES above — see
+ * design-judge-bulk.ts's checkStyleAlignment(). */
+export const ART_RULES = `
 HARD RULES:
 - 100% original artwork. Do not reproduce real photographic likenesses, logos,
   trademarks, brand marks, album art, celebrity portraits, copyrighted characters,
@@ -554,6 +561,80 @@ If regeneration is needed, write a concise corrected prompt in regenerationPromp
       },
     },
     required: ["usable", "issues", "needsRegeneration", "regenerationPrompt", "colorMatchesArt", "fix"],
+  },
+
+  /** ── BULK STYLE-ALIGNMENT RE-CHECK — text model (issue #17) ─────────────
+   * Re-validates an ALREADY-GENERATED design's creative fields against the
+   * exact same BRAND_VOICE/CONCEPT_RULES/ART_RULES constants used at
+   * generation time (conceptSystem/batchSystem above both embed these same
+   * three constants) — this prompt embeds the identical text rather than
+   * re-describing the rules, specifically so a future edit to those
+   * constants can't leave this bulk check silently out of sync (the
+   * "redefinition -> drift" risk called out in the issue). See
+   * design-judge-bulk.ts's checkStyleAlignment().
+   */
+  styleAlignmentReview: (c: {
+    phrase: string;
+    visualConcept: string;
+    backPhrase?: string | null;
+  }) =>
+    `
+Re-validate this ALREADY-GENERATED t-shirt concept as a strict content
+reviewer, against the exact brand voice and concept rules used when it was
+first written. This is a bulk QA re-check, not a fresh generation — judge
+only whether the fields below still satisfy every rule.
+
+${BRAND_VOICE}
+
+${CONCEPT_RULES}
+
+ART_RULES below governs the RENDERED ARTWORK PIXELS only (what the image
+model is told to draw/not draw) — it is NOT a rule about what visualConcept
+may describe in words. Only flag visualConcept against ART_RULES if it
+explicitly INSTRUCTS drawing a specific prohibited element (e.g. "include
+the Nike swoosh logo", "recreate this exact meme screenshot", "add a
+signature in the corner") — never merely for describing a genre/aesthetic
+(e.g. "arcade game style", "badge/emblem layout" — CONCEPT_RULES above
+explicitly lists "badge/emblem" as an encouraged idea, which is not in
+conflict with ART_RULES' "no ... badges" instruction to the image model
+about literal UI-chrome badges/watermarks/labels).
+
+${ART_RULES}
+
+Concept to re-validate:
+phrase: ${q(c.phrase)}
+visualConcept: ${clean(c.visualConcept)}
+${c.backPhrase ? `backPhrase: ${q(c.backPhrase)}` : `backPhrase: (not set — this design predates the back-print feature; do NOT flag a missing/empty backPhrase as a violation, there is nothing to judge here)`}
+
+Return JSON only:
+{
+  "aligned": true,
+  "violations": []
+}
+
+Set "aligned" to false and list EVERY specific rule violated in
+"violations" (one concise sentence per violation, quoting the offending
+text) if phrase/visualConcept/backPhrase fail ANY rule above — including
+(but not limited to): phrase not short/punchy/legible or over the
+2-5-word/~32-character target, non-ASCII characters or emojis/hashtags,
+copied lyrics/movie lines/brand slogans/meme captions, real names used
+without justification, a visualConcept that isn't concretely drawable, or a
+backPhrase that just repeats/rephrases the front phrase instead of paying
+it off. If every rule is satisfied, return aligned: true and an empty
+violations array.
+`.trim(),
+
+  /** JSON schema enforced on the style-alignment judge's response — see
+   * styleAlignmentReview() above and design-judge-bulk.ts's
+   * checkStyleAlignment(). */
+  styleAlignmentSchema: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      aligned: { type: "boolean" },
+      violations: { type: "array", items: { type: "string" } },
+    },
+    required: ["aligned", "violations"],
   },
 
   gossipExamples: `
