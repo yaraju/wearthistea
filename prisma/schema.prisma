@@ -86,6 +86,38 @@ model Design {
   // Order's errorMessage, which covers approval/fulfillment failures.
   errorMessage String? @db.Text
 
+  // ── LLM-as-judge validation lifecycle — separate from `status` above,
+  // which stays exactly generating|generated|failed and is read/written in
+  // 19 files across the app. This lifecycle is independent:
+  // unjudged|pending|validating|regenerating|validated|superseded|rejected.
+  // Default is "unjudged" (not "validated") so every pre-existing row is
+  // backfilled as "predates this feature" — a bulk judge run can then cheaply
+  // find exactly the rows it hasn't looked at yet via
+  // `WHERE validationStatus = 'unjudged'`, without needing to distinguish
+  // "actually validated" from "never checked". Every new design created going
+  // forward is expected to explicitly set "pending" at creation time rather
+  // than relying on this default.
+  validationStatus String @default("unjudged")
+  // Two independent counters (rather than one shared counter) since the two
+  // kinds of attempt have different caps and are incremented by different
+  // parts of the pipeline: cheap programmatic fixes (cap 2) vs. a full
+  // regenerate-from-scratch (cap 1).
+  validationFixAttempts   Int     @default(0)
+  validationRegenAttempts Int     @default(0)
+  // Last judge verdict/issues — for debugging and admin visibility only.
+  validationNotes         String? @db.Text
+
+  // Set on the NEW design a bulk-judge (or admin "regenerate") action spawns
+  // from a source design — points back at the design it was regenerated
+  // from. The source row itself is never mutated; this is the only link
+  // between them. Mirrors Order.regeneratedFromOrderId below. @unique
+  // enforces at most one regeneration per source design at the DB level
+  // (Postgres treats multiple NULLs as distinct in a unique index, so
+  // ordinary designs are never constrained by this).
+  regeneratedFromDesignId String?  @unique
+  regeneratedFrom         Design?  @relation("DesignRegeneration", fields: [regeneratedFromDesignId], references: [id])
+  regeneratedInto         Design[] @relation("DesignRegeneration")
+
   // Printrove's uploaded design asset id — set once (on first upload) and
   // reused for every (category, color) DesignProduct below, since the
   // upload itself doesn't depend on category or size. Never re-uploaded
@@ -143,6 +175,7 @@ model Design {
   @@index([batchId])
   @@index([createdByUserId])
   @@index([createdByAnonId])
+  @@index([validationStatus])
 }
 
 // One real Printrove Product Library entry + mockup for a (design, category,
