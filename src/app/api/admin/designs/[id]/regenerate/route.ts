@@ -64,7 +64,11 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     // "regenerate" click against the same source design now hits that
     // constraint instead of silently creating another sibling. Surface it
     // as a clear 409 rather than a bare 500.
-    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+    if (
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === "P2002" &&
+      (err.meta?.target as string[] | undefined)?.includes("regeneratedFromDesignId")
+    ) {
       const existing = await prisma.design.findUnique({ where: { regeneratedFromDesignId: source.id } });
       return NextResponse.json(
         {
