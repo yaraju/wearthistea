@@ -226,6 +226,31 @@ PrintRove mockup poll for this part (deterministic Satori/sharp compositing,
 no LLM call — same reasoning as the 2026-09-12 entry above for why this
 doesn't need a fresh catalog re-check).
 
+### The actual changed code path (`ensureDesignProduct`) — confirmed live, real data
+
+The `fulfill()` runs above exercise `printrove.ts`, which was already
+color-correct (`resolveVariantIdDynamically`) before this issue — they prove
+the White variant ids are right, but not that `design-products.ts`'s actual
+fix works. Separately ran `ensureDesignProduct()` itself (the real,
+production-called function this issue changed) against a real production
+design:
+
+- Picked an existing `variantColor: "White"` design in prod ("Retro
+  Appliance Astro Tee" / "Bad Vibes Cooking", id `cmtjypa750008h8v0d6rxzn84`)
+  and called `ensureDesignProduct(designId, "men")` directly (note:
+  `GCS_BUCKET` must be passed explicitly for a local script to read the real
+  artwork — the checked-in `.env` doesn't set it, so a first attempt without
+  it correctly-but-uselessly failed with "Artwork file is missing").
+- Result: a genuinely new `DesignProduct` row (`color: "White"`,
+  `printroveProductId: "880542"`), which is exactly what production creates
+  the next time this design's pick-modal opens for "men" — not a synthetic
+  write.
+- Polled the resulting product; mockup filenames again read
+  `White_M_Men_Round`. Downloaded and visually confirmed: the design's real
+  art (a retro timer illustration + "BAD VIBES COOKING") correctly
+  composited on an actual white garment via the changed code path itself,
+  not just the parallel `fulfill()` path.
+
 ### Checkout-path bug (#23) — partially fixed here, see issue #5's comment
 
 `PickDesignModal.tsx` hardcoded `color: "Black"` in the checkout payload,
@@ -248,3 +273,4 @@ scope — see the issue #5 comment for the full breakdown.
 | 880539 | Men's/M | Black baseline, confirms nothing broke | Black |
 | 880540 | Men's/M | White-variant fulfillment, ad-hoc pre-`--color` run | White |
 | 880541 | Men's/M | White-variant fulfillment, reproducible via `--color=White` | White |
+| 880542 | Men's/M | `ensureDesignProduct()` itself, real prod design ("Retro Appliance Astro Tee") | White |
