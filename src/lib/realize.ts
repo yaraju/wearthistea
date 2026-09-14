@@ -2,7 +2,7 @@ import { prisma } from "./prisma";
 import { renderConceptArt, isTransientProviderError } from "./gemini";
 import { settings } from "@/config/settings";
 import { prompts, type Concept } from "@/config/prompts";
-import { saveImageWithPreview, hasDurableStorage } from "./storage";
+import { saveImageWithPreview, hasDurableStorage, assertDesignPathFieldsShape } from "./storage";
 import { svgToPng } from "./svg-utils";
 import { compositeOnTee } from "./mockup";
 import { renderBackDesignArtwork, type BackLayout } from "./back-design";
@@ -133,6 +133,19 @@ export async function realizeDesign(designId: string, parent?: any) {
       }
     }
     storageObservation.end({ output: "success" });
+
+    // Static shape check, no GCS API call — catches a bypassed/malformed
+    // path (see storage.ts's assertDesignPathFieldsShape) before it ever
+    // reaches the DB. Deliberately unconditional on GCS_BUCKET — see that
+    // function's doc comment for why.
+    assertDesignPathFieldsShape({
+      designImagePath,
+      designPreviewImagePath,
+      productImagePath,
+      productPreviewImagePath,
+      backDesignImagePath,
+      backDesignPreviewImagePath,
+    });
 
     const updated = await prisma.design.update({
       where: { id: designId },

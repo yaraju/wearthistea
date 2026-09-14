@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/auth";
 import { designSlug } from "@/lib/slug";
+import { assertDesignPathFieldsShape } from "@/lib/storage";
 
 export const runtime = "nodejs";
 
@@ -28,6 +29,21 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 
   let sibling;
   try {
+    // Fresh render + fresh approval cycle — never carry over the source's
+    // Printrove asset ids (they point at ITS art) or any DesignProduct rows
+    // (a sibling regenerate is meant to be independently reviewable). Always
+    // "" here (art renders later, via the client's follow-up
+    // /api/generate/retry call), which the guard below always passes —
+    // wired anyway so this stays guarded if a future edit ever computes a
+    // real path at this call site instead. See storage.ts's
+    // assertDesignPathFieldsShape.
+    const siblingPathFields = {
+      designImagePath: "",
+      productImagePath: "",
+      designPreviewImagePath: "",
+      productPreviewImagePath: "",
+    };
+    assertDesignPathFieldsShape(siblingPathFields);
     sibling = await prisma.design.create({
       data: {
         batchId: source.batchId,
@@ -43,13 +59,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
         productPrompt: source.productPrompt,
         category: source.category,
         variantColor: source.variantColor,
-        // Fresh render + fresh approval cycle — never carry over the source's
-        // Printrove asset ids (they point at ITS art) or any DesignProduct
-        // rows (a sibling regenerate is meant to be independently reviewable).
-        designImagePath: "",
-        productImagePath: "",
-        designPreviewImagePath: "",
-        productPreviewImagePath: "",
+        ...siblingPathFields,
         status: "generating",
         // Record lineage back to the source design — mirrors
         // Order.regeneratedFromOrderId. Populated here (not just by the

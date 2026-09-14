@@ -18,7 +18,7 @@ dotenv.config();
 
 async function main() {
   const { prisma } = await import("../src/lib/prisma");
-  const { getFile, saveFile } = await import("../src/lib/storage");
+  const { getFile, saveFile, assertDesignPathFieldsShape } = await import("../src/lib/storage");
   const { createPreviewImage } = await import("../src/lib/image-preview");
 
   function previewRelPath(fullResPublicPath: string): string {
@@ -108,6 +108,10 @@ async function main() {
     }
 
     if (Object.keys(data).length > 0) {
+      // Static shape check before the write — see storage.ts's
+      // assertDesignPathFieldsShape / issue #25 (this is exactly the class
+      // of migration script the incident happened in).
+      assertDesignPathFieldsShape(data);
       await prisma.design.update({ where: { id: d.id }, data });
       backfilled++;
     } else {

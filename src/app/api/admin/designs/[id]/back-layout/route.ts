@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/auth";
 import { settings } from "@/config/settings";
-import { saveImageWithPreview } from "@/lib/storage";
+import { saveImageWithPreview, assertDesignPathFieldsShape } from "@/lib/storage";
 import { renderBackDesignArtwork, type BackLayout } from "@/lib/back-design";
 
 export const runtime = "nodejs";
@@ -52,6 +52,13 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   }
 
   const saved = await saveImageWithPreview(design.batchId, `${design.id}-back-flip-${Date.now()}.png`, backB64);
+
+  // Static shape check before the write — see storage.ts's
+  // assertDesignPathFieldsShape.
+  assertDesignPathFieldsShape({
+    backDesignImagePath: saved.path,
+    backDesignPreviewImagePath: saved.previewPath,
+  });
 
   const updated = await prisma.design.update({
     where: { id },

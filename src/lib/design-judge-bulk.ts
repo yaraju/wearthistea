@@ -23,7 +23,7 @@
  */
 import type { Design } from "@prisma/client";
 import { ai } from "./gemini";
-import { existsInGcs, hasDurableStorage } from "./storage";
+import { existsInGcs, hasDurableStorage, assertDesignPathFieldsShape } from "./storage";
 import { prompts } from "@/config/prompts";
 import { settings } from "@/config/settings";
 import type { JudgeVerdict } from "./design-judge";
@@ -309,6 +309,17 @@ export async function flagAndTriggerStuckDesign(
     const { Prisma } = await import("@prisma/client");
 
     try {
+      // Always "" here (art renders later, via renderDesignArtwork below),
+      // which the guard always passes — wired anyway so this stays guarded
+      // if a future edit ever computes a real path at this call site
+      // instead. See storage.ts's assertDesignPathFieldsShape.
+      const siblingPathFields = {
+        designImagePath: "",
+        productImagePath: "",
+        designPreviewImagePath: "",
+        productPreviewImagePath: "",
+      };
+      assertDesignPathFieldsShape(siblingPathFields);
       sibling = await prisma.design.create({
         data: {
           batchId: design.batchId,
@@ -324,10 +335,7 @@ export async function flagAndTriggerStuckDesign(
           productPrompt: design.productPrompt,
           category: design.category,
           variantColor: design.variantColor,
-          designImagePath: "",
-          productImagePath: "",
-          designPreviewImagePath: "",
-          productPreviewImagePath: "",
+          ...siblingPathFields,
           status: "generating",
           regeneratedFromDesignId: design.id,
         },

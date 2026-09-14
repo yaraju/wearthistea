@@ -3,7 +3,7 @@ import { renderConceptArt, isTransientProviderError } from "@/lib/gemini";
 import type { Concept } from "@/config/prompts";
 import { compositeOnTee } from "@/lib/mockup";
 import { renderBackDesignArtwork, type BackLayout } from "@/lib/back-design";
-import { saveImageWithPreview, hasDurableStorage } from "@/lib/storage";
+import { saveImageWithPreview, hasDurableStorage, assertDesignPathFieldsShape } from "@/lib/storage";
 import { settings } from "@/config/settings";
 import { recordGenerateUsage, type RateLimitResult } from "@/lib/rate-limit";
 import { enqueuePrintroveProducts } from "@/lib/tasks";
@@ -106,6 +106,19 @@ export async function renderDesignArtwork(
       // Back print is optional — front art is what the customer is waiting on.
     }
   }
+
+  // Static shape check, no GCS API call — catches a bypassed/malformed path
+  // (see storage.ts's assertDesignPathFieldsShape) before it ever reaches
+  // the DB. Deliberately unconditional on GCS_BUCKET — see that function's
+  // doc comment for why.
+  assertDesignPathFieldsShape({
+    designImagePath,
+    designPreviewImagePath,
+    productImagePath,
+    productPreviewImagePath,
+    backDesignImagePath,
+    backDesignPreviewImagePath,
+  });
 
   return prisma.design.update({
     where: { id: design.id },

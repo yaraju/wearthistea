@@ -5,6 +5,7 @@ import { renderDesignArtwork, isTransientProviderError } from "@/lib/design-rend
 import { checkGenerateRateLimit } from "@/lib/rate-limit";
 import { enqueuePrintroveProducts } from "@/lib/tasks";
 import { ensureDesignProduct } from "@/lib/design-products";
+import { assertDesignPathFieldsShape } from "@/lib/storage";
 import { settings } from "@/config/settings";
 import { langfuse, getTraceId } from "@/lib/langfuse";
 import { logger } from "@/lib/logger";
@@ -86,6 +87,13 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   //    rejected art if renderDesignArtwork's re-render is ever skipped.
   //  - designImageData / image paths: stale until renderDesignArtwork runs.
   const design = order.design;
+  // Static shape check before the write — see storage.ts's
+  // assertDesignPathFieldsShape. Always "" here (stale until
+  // renderDesignArtwork below runs), which the guard always passes — wired
+  // anyway so this stays guarded if a future edit ever computes a real path
+  // at this call site instead.
+  const clonePathFields = { productImagePath: "", designImagePath: "" };
+  assertDesignPathFieldsShape(clonePathFields);
   const clonedDesign = await prisma.design.create({
     data: {
       batchId: design.batchId,
@@ -101,8 +109,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       productPrompt: design.productPrompt,
       category: design.category,
       variantColor: design.variantColor,
-      productImagePath: "",
-      designImagePath: "",
+      ...clonePathFields,
       status: "generating",
     },
   });

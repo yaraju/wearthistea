@@ -17,7 +17,7 @@ dotenv.config();
 async function main() {
   const { prisma } = await import("../src/lib/prisma");
   const { renderBackDesignArtwork } = await import("../src/lib/back-design");
-  const { saveImageWithPreview } = await import("../src/lib/storage");
+  const { saveImageWithPreview, assertDesignPathFieldsShape } = await import("../src/lib/storage");
   const { settings } = await import("../src/config/settings");
   type BackLayout = "upper-back" | "full-panel" | "chest-height";
 
@@ -44,6 +44,13 @@ async function main() {
         color: d.variantColor || settings.printify.defaultColor,
       });
       const saved = await saveImageWithPreview(d.batchId, `${d.id}-back-fixed.png`, backB64);
+      // Static shape check before the write — see storage.ts's
+      // assertDesignPathFieldsShape / issue #25 (this is exactly the class
+      // of migration script the incident happened in).
+      assertDesignPathFieldsShape({
+        backDesignImagePath: saved.path,
+        backDesignPreviewImagePath: saved.previewPath,
+      });
       await prisma.design.update({
         where: { id: d.id },
         data: {

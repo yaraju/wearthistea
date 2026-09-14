@@ -173,6 +173,114 @@ export async function existsInGcs(
   return exists;
 }
 
+/**
+ * Design.<field>Path columns (productImagePath, designImagePath,
+ * productPreviewImagePath, designPreviewImagePath, backDesignImagePath,
+ * backDesignPreviewImagePath) must always hold a canonical public URL of the
+ * exact shape saveImage()/saveFile() return: `${URL_PREFIX}/<batchId>/<file>`.
+ * A synchronous, no-API-call sibling to existsInGcs() (#17) — that one
+ * confirms bytes are actually durable in the *real bucket*; this one only
+ * confirms the *string* isn't already something other than the URL those
+ * helpers hand back, and it runs immediately before any DB write instead of
+ * requiring a network round trip.
+ *
+ * DESIGN DECISION (issue #25) — reject-always, not
+ * reject-only-when-GCS_BUCKET-is-configured:
+ * saveImage()'s GCS branch and its local-disk-fallback branch both build and
+ * return this identical `${URL_PREFIX}/<batchId>/<file>` string (see
+ * saveImage() above) — the shape does not depend on which backend actually
+ * wrote the bytes. So the documented, legitimate local-dev fallback
+ * (GCS_BUCKET unset) already produces a conforming path today, and making
+ * this check conditional on GCS_BUCKET would add nothing: a
+ * reject-only-when-configured version would (a) let a bypassed/malformed
+ * path straight into the DB on every machine that happens to run without
+ * GCS_BUCKET — i.e. exactly the machines the 127-row incident (AGENTS.md's
+ * GCS_BUCKET gotcha) happened on — and (b) still have to unconditionally
+ * reject when it IS configured, so the "legitimate local path" carve-out it
+ * exists for would never actually fire. Enforcing the shape unconditionally
+ * is what actually matches the incident: it catches a raw filesystem path
+ * (an absolute STORAGE_DIR path, `./public/generated/...`, a bare filename),
+ * base64/data-URI content, or any other hand-built string bypassing
+ * storage.ts's own saveImage()/saveFile() helpers — landing in the DB as if
+ * it were a real, servable path — regardless of whether GCS_BUCKET happens
+ * to be set on the machine running the write. It intentionally does NOT
+ * check whether the object actually exists anywhere (that's existsInGcs()'s
+ * job, and it can't be done synchronously).
+ *
+ * `value` may be null/undefined/"" and both pass through untouched: several
+ * legitimate call sites persist these columns before art exists yet (a
+ * freshly-created Design row uses "" as a not-rendered-yet placeholder) or
+ * intentionally leave an optional back-print column unset — neither is the
+ * bug this guards against.
+ */
+// Every current call site produces exactly "/generated/<batchId>/<file>"
+// (two segments — see saveImageWithPreview()'s callers, all of which pass a
+// bare filename, never a nested one), but this deliberately accepts any
+// non-empty path under a given batchId (`[^/]+/.+`) rather than hard-coding
+// "exactly two segments": a prod-DB read-only audit to confirm every
+// existing row is exactly two segments wasn't available in this run's
+// sandbox (read against production blocked), and a narrower regex that's
+// wrong about some legacy row's shape would make a legitimate backfill
+// write (e.g. backfill-preview-images.ts) throw. Still rejects every local-
+// disk-shaped/bypass case this guards against (wrong prefix, no leading
+// slash, `./...`, an absolute filesystem path, a missing batchId segment,
+// backslashes, `..` traversal) — see scripts/test-storage-path-guard.ts.
+const DESIGN_PATH_SHAPE = new RegExp(`^${URL_PREFIX}/[^/]+/.+$`);
+
+/** Reject even a value the shape regex above would accept if it still
+ * contains a directory-traversal segment or a Windows path separator —
+ * belt-and-suspenders against a bypassed path that happens to start with
+ * "/generated/" (e.g. someone string-concatenating URL_PREFIX onto a raw fs
+ * path by hand). Deliberately does NOT check for ":" — a legitimate
+ * batchId/filename segment can't be ruled out from containing one, and
+ * every actual bypass shape this guards against (an absolute fs path, a
+ * relative "./..." path, a wrong prefix) is already caught by the prefix
+ * check above before this ever runs. */
+function hasSuspiciousSegment(value: string): boolean {
+  return value.includes("\\") || value.includes("..");
+}
+
+export function assertDesignPathShape(fieldName: string, value: string | null | undefined): void {
+  if (value === null || value === undefined || value === "") return;
+  if (!DESIGN_PATH_SHAPE.test(value) || hasSuspiciousSegment(value)) {
+    throw new Error(
+      `[storage] Refusing to persist Design.${fieldName} = ${JSON.stringify(value)} — doesn't match the ` +
+        `expected "${URL_PREFIX}/<batchId>/<file>" public-URL shape that saveImage()/saveFile() always return ` +
+        `(from both their GCS and local-disk-fallback branches). This most likely means a raw filesystem path, ` +
+        `base64 data, or a hand-built path bypassed storage.ts's helpers before reaching the DB — see issue #25 ` +
+        `and AGENTS.md's GCS_BUCKET gotcha for the incident this guards against.`
+    );
+  }
+}
+
+export const DESIGN_PATH_FIELDS = [
+  "productImagePath",
+  "designImagePath",
+  "productPreviewImagePath",
+  "designPreviewImagePath",
+  "backDesignImagePath",
+  "backDesignPreviewImagePath",
+] as const;
+
+export type DesignPathFieldsPatch = Partial<
+  Record<(typeof DESIGN_PATH_FIELDS)[number], string | null | undefined>
+>;
+
+/**
+ * Same check as assertDesignPathShape, but for a whole Prisma
+ * create/update `data` payload at once — the shape every call site actually
+ * has on hand right before `prisma.design.create(...)`/`.update(...)`. Only
+ * checks fields actually present in `data`, so a partial update (e.g. one
+ * that only touches `backDesignImagePath`) isn't forced to also supply the
+ * other five. Throws (and so aborts the write — call this BEFORE the prisma
+ * call, never after) on the first offending field.
+ */
+export function assertDesignPathFieldsShape(data: DesignPathFieldsPatch): void {
+  for (const field of DESIGN_PATH_FIELDS) {
+    if (field in data) assertDesignPathShape(field, data[field]);
+  }
+}
+
 /** Get the file content and type for serving via route handler. */
 export async function getFile(relPath: string): Promise<{ data: Uint8Array; contentType: string }> {
   const ext = path.extname(relPath).toLowerCase();

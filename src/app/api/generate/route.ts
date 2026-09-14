@@ -16,6 +16,7 @@ import { embedTexts, toVectorParam } from "@/lib/embeddings";
 import { checkGenerateRateLimit } from "@/lib/rate-limit";
 import { enqueueDesignRender } from "@/lib/tasks";
 import { finalizeDesignRender } from "@/lib/design-render";
+import { assertDesignPathFieldsShape } from "@/lib/storage";
 
 /** Run `worker` over `items`, at most `concurrency` at a time — used for the
  * inline-render fallback below (no render queue configured), so a full
@@ -121,8 +122,20 @@ export async function POST(req: Request) {
 
     const createDesignSpan = trace.span({ name: "create-design-rows" });
     const designs = await Promise.all(
-      concepts.map((c) =>
-        prisma.design.create({
+      concepts.map((c) => {
+        // Always "" at row creation — art renders later, dispatched below
+        // (design-render.ts's renderDesignArtwork resolves the real paths).
+        // Static shape check before the write anyway (see storage.ts's
+        // assertDesignPathFieldsShape) so this call site stays guarded if a
+        // future edit ever starts computing a real path here instead.
+        const pathFields = {
+          designImagePath: "",
+          productImagePath: "",
+          designPreviewImagePath: "",
+          productPreviewImagePath: "",
+        };
+        assertDesignPathFieldsShape(pathFields);
+        return prisma.design.create({
           data: {
             batchId: batch.id,
             title: c.title,
@@ -138,15 +151,12 @@ export async function POST(req: Request) {
             // resolves it from the actual art and writes Design.variantColor
             // then (see design-render.ts's renderDesignArtwork).
             productPrompt: `[mockup composite of clean design on tee — color resolved at render time]`,
-            designImagePath: "",
-            productImagePath: "",
-            designPreviewImagePath: "",
-            productPreviewImagePath: "",
+            ...pathFields,
             category: resolvedCategory,
             status: "generating",
           },
-        })
-      )
+        });
+      })
     ).catch((err) => {
       createDesignSpan.end({ level: "ERROR", statusMessage: String(err) });
       throw err;
