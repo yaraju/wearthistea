@@ -263,6 +263,21 @@ export default function KeywordStudio() {
       .catch(err => console.error("Failed to fetch gossip examples", err));
   }, []);
 
+  // Fetches the "similar designs" fallback grid for a keyword — shared by a
+  // fresh spill() and by the mount-restore effect below, which needs the
+  // exact same lookup for whatever keyword it's restoring. Never throws;
+  // a failed/slow lookup here must never block or fail the caller.
+  function fetchPreBrewed(tea: string) {
+    fetch("/api/designs/prebrewed", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ keyword: tea }),
+    })
+      .then((res) => (res.ok ? res.json() : { matches: [] }))
+      .then((data: { matches: DesignMatchDTO[] }) => setPreBrewed(data.matches ?? []))
+      .catch((err) => console.error("Failed to fetch pre-brewed matches", err));
+  }
+
   // Restore whatever brew was still in flight (or just finished) the last
   // time this browser had the studio open — so closing the tab mid-brew
   // doesn't read as having lost it. Runs once on mount; a batch that's since
@@ -278,6 +293,7 @@ export default function KeywordStudio() {
         setKeyword(saved.keyword);
         setResult(data);
         setPhase("done");
+        fetchPreBrewed(saved.keyword);
         if (data.designs.some((d) => d.status === "generating")) {
           startPolling(saved.batchId);
         }
@@ -304,14 +320,7 @@ export default function KeywordStudio() {
     // a slow or failed match lookup must never delay or block brewing, which
     // is the actual product. Resolves independently and renders below the
     // fresh-brew grid whenever it's ready.
-    fetch("/api/designs/prebrewed", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ keyword: tea }),
-    })
-      .then((res) => (res.ok ? res.json() : { matches: [] }))
-      .then((data: { matches: DesignMatchDTO[] }) => setPreBrewed(data.matches ?? []))
-      .catch((err) => console.error("Failed to fetch pre-brewed matches", err));
+    fetchPreBrewed(tea);
 
     try {
       const res = await fetch("/api/generate", {
