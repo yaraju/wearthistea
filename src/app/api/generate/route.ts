@@ -263,7 +263,16 @@ export async function POST(req: Request) {
     return NextResponse.json({
       batchId: batch.id,
       keyword,
-      designs: designs.map((d) => ({ ...d, slug: designSlugs.get(d.id) ?? null })),
+      // Strips validationNotes same as GET /api/generate/status — see that
+      // route's doc comment: judge/fix verdict text is admin-only, not
+      // customer-facing (unset at this point anyway, since validation runs
+      // after creation, but kept symmetric with the other customer-facing
+      // design payload rather than relying on that).
+      designs: designs.map((d) => {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { validationNotes, ...safe } = d;
+        return { ...safe, slug: designSlugs.get(d.id) ?? null };
+      }),
       options: getProvider().options(resolvedCategory),
     });
   } catch (err) {

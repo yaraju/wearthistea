@@ -8,6 +8,7 @@ import { getColorCode } from "@/lib/colors";
 import { friendlyError } from "@/lib/error-messages";
 import { track } from "@/lib/analytics";
 import { getAnonId, ANON_ID_HEADER } from "@/lib/anon-id";
+import { shouldStopPolling, isValidationInFlight } from "@/lib/validation-status";
 import PickDesignModal from "@/components/PickDesignModal";
 import ReviewBadge from "@/components/ReviewBadge";
 
@@ -172,6 +173,33 @@ function GeneratingPlaceholder({ seed, reduce }: { seed: string; reduce: boolean
   );
 }
 
+// Copy for the badge layered over an already-visible design card while the
+// judge/fix loop (issues #12-#15) works in the background — see issue #16.
+// Deliberately doesn't cover every ValidationStatus: "validated"/"unjudged"/
+// "rejected" render no badge at all (handled by the caller), so this only
+// needs entries for the in-flight states.
+const VALIDATION_BADGE_COPY: Record<string, string> = {
+  pending: "Getting a second opinion…",
+  validating: "Getting a second opinion…",
+  regenerating: "Polishing a couple of details…",
+};
+
+/** Small badge shown over an already-revealed design image while its
+ * validationStatus is still in flight (pending/validating/regenerating) —
+ * NOT a loading gate. The image itself renders exactly as it does today;
+ * this only adds a pill on top of it, and disappears once validationStatus
+ * reaches "validated" (or the design is otherwise no longer in flight). */
+function ValidationBadge({ validationStatus }: { validationStatus?: string }) {
+  if (!isValidationInFlight(validationStatus)) return null;
+  const copy = VALIDATION_BADGE_COPY[validationStatus!] ?? VALIDATION_BADGE_COPY.pending;
+  return (
+    <span className="absolute bottom-3 left-3 inline-flex max-w-[calc(100%-1.5rem)] items-center gap-1.5 rounded-full bg-ink/75 px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-paper backdrop-blur-sm">
+      <Loader2 className="h-3 w-3 shrink-0 animate-spin" aria-hidden />
+      <span className="truncate">{copy}</span>
+    </span>
+  );
+}
+
 export default function KeywordStudio() {
   const [keyword, setKeyword] = useState("");
   const [phase, setPhase] = useState<Phase>("idle");
@@ -222,8 +250,10 @@ export default function KeywordStudio() {
           }),
         };
       });
-      const stillGenerating = data.designs.some((d) => d.status === "generating");
-      if (!stillGenerating) stopPolling();
+      // Stop once every design's rendering AND its validation
+      // (pending/validating/regenerating) are both done — see
+      // shouldStopPolling()'s doc comment for why this isn't just "generating".
+      if (shouldStopPolling(data.designs)) stopPolling();
     } catch (err) {
       console.error("Failed to poll batch status", err);
     }
@@ -285,7 +315,10 @@ export default function KeywordStudio() {
         setResult(data);
         setPhase("done");
         fetchPreBrewed(saved.keyword);
-        if (data.designs.some((d) => d.status === "generating")) {
+        // Same stop condition as pollBatchStatus() — a design that's
+        // "generated" but still validating/regenerating needs polling
+        // resumed on reopen too, or its badge would render and freeze.
+        if (!shouldStopPolling(data.designs)) {
           startPolling(saved.batchId);
         }
       } catch (err) {
@@ -628,7 +661,10 @@ function DesignCard({
   const [status, setStatus] = useState(design.status);
   const [open, setOpen] = useState(false);
 
-  const failed = design.status === "failed";
+  // A judge-rejected design (validationStatus "rejected") gets no badge and
+  // is treated like today's "failed" card state (issue #16 scope) — #13
+  // owns whatever richer rejected-specific UI/remedy comes later.
+  const failed = design.status === "failed" || design.validationStatus === "rejected";
   const generating = design.status === "generating";
   const queued = status === "pending";
 
@@ -700,6 +736,11 @@ function DesignCard({
             {design.vibe}
           </span>
         )}
+        {/* Layered over the already-visible image, not a loading gate — see
+            ValidationBadge's doc comment. Only while the image itself is
+            actually showing, so it never overlays GeneratingPlaceholder or
+            the failed-art message. */}
+        {img && <ValidationBadge validationStatus={design.validationStatus} />}
       </div>
 
       <figcaption className="flex flex-1 flex-col p-4">
@@ -727,15 +768,24 @@ function DesignCard({
                 {friendlyError(design.errorMessage)}
               </p>
             )}
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onRetry?.(design.id);
-              }}
-              className="mt-2 inline-flex items-center gap-1 font-mono text-xs font-bold uppercase tracking-widest text-pink transition-colors hover:text-pink-ink"
-            >
-              <RotateCcw className="h-3 w-3" /> Retry Render
-            </button>
+            {/* Retry re-renders artwork (POST /api/generate/retry) — the
+                right remedy for design.status === "failed", but not for a
+                judge-rejected design: its art already rendered fine, so
+                retrying would just come back still validationStatus
+                "rejected" with no way to clear it. Only offered for an
+                actual render failure; #13 owns whatever rejected-specific
+                remedy (if any) belongs here. */}
+            {design.status === "failed" && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRetry?.(design.id);
+                }}
+                className="mt-2 inline-flex items-center gap-1 font-mono text-xs font-bold uppercase tracking-widest text-pink transition-colors hover:text-pink-ink"
+              >
+                <RotateCcw className="h-3 w-3" /> Retry Render
+              </button>
+            )}
           </div>
         ) : generating ? (
           <div className="flex items-center gap-1.5 font-mono text-xs text-ink-soft">

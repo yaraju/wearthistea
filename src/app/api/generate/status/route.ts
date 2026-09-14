@@ -14,6 +14,13 @@ export const runtime = "nodejs";
  *
  * Same response shape as POST /api/generate (batchId/keyword/designs/
  * options) so the client can treat a restore and a fresh brew identically.
+ *
+ * Each design's `validationStatus` (issue #11's judge/fix lifecycle) rides
+ * along here same as any other plain column — KeywordStudio.tsx's
+ * pollBatchStatus() polls until every design's `status` AND
+ * `validationStatus` are both terminal (see shouldStopPolling() in
+ * src/lib/validation-status.ts) and shows a badge while validation is in
+ * flight (issue #16).
  */
 export async function GET(req: Request) {
   const batchId = new URL(req.url).searchParams.get("batchId");
@@ -33,10 +40,14 @@ export async function GET(req: Request) {
 
   // Never send full-res print files to a customer-facing caller — only the
   // downscaled previews (same stripping /api/generate/retry and
-  // /api/designs/[id] already do).
+  // /api/designs/[id] already do). Also strips validationNotes — the
+  // judge/fix loop's last verdict/issues text, which schema.prisma's
+  // comment on that column calls "for debugging and admin visibility only",
+  // not customer-facing (validationStatus itself, driving issue #16's
+  // badge, is fine to send and stays in `safe`).
   const safeDesigns = designs.map((d) => {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { designImagePath, productImagePath, designImageData, backDesignImagePath, ...safe } = d;
+    const { designImagePath, productImagePath, designImageData, backDesignImagePath, validationNotes, ...safe } = d;
     return safe;
   });
 

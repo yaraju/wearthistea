@@ -45,6 +45,13 @@ export interface DesignDTO {
   errorMessage: string | null; // generation-failure detail
   // True when designImageData is stored in the DB — safe to retry without the file on disk.
   hasImageData?: boolean;
+  // LLM-as-judge validation lifecycle (issue #11) — one of
+  // src/lib/validation-status.ts's VALIDATION_STATUSES. Optional/loosely
+  // typed `string` (not that literal union) so this DTO stays satisfied by
+  // any Prisma Design row, including ones from before this field existed;
+  // absent should be treated the same as "unjudged" (no badge, not in
+  // flight — see isValidationInFlight()).
+  validationStatus?: string;
 }
 
 // Shape of an Order (one purchase of a Design) as returned to the admin
