@@ -277,16 +277,16 @@ export async function renderConceptArt(
 const COLOR_CHOICE_RE = /^COLOR_CHOICE:\s*(black|white)\s*$/im;
 
 /**
- * Mean-luminance fallback for when the image call's text response is
- * missing or doesn't carry a parseable COLOR_CHOICE line (the Imagen path
- * never returns text at all; the flash-image model occasionally drops the
- * line). Measures the actual non-transparent ink pixels of the rendered
- * art: light ink implies it was drawn to read on a black garment, dark ink
- * implies white — deterministic given the same pixels, so this stays
- * self-consistent with what's actually on screen even without the model's
- * own self-report.
+ * Ground-truth mean luminance (0-255) of an image's non-transparent "ink"
+ * pixels, measured directly from pixel data with sharp — not the vision
+ * model's guess, which can't reliably perceive alpha/pixel values (see
+ * scripts/eval-designs.ts's alpha-channel lesson). Returns null when the
+ * image has no non-transparent pixels at all (e.g. a fully transparent/
+ * blank render). Exported standalone so both resolveGarmentColorFromLuminance
+ * below and design-judge.ts's color-fitness grounding share one
+ * implementation instead of two copies of this pixel loop drifting apart.
  */
-export async function resolveGarmentColorFromLuminance(imageB64: string): Promise<"Black" | "White"> {
+export async function measureInkLuminance(imageB64: string): Promise<number | null> {
   const { data, info } = await sharp(Buffer.from(imageB64, "base64"))
     .ensureAlpha()
     .raw()
@@ -305,11 +305,27 @@ export async function resolveGarmentColorFromLuminance(imageB64: string): Promis
     count++;
   }
 
+  if (count === 0) return null;
+  return sum / count;
+}
+
+/**
+ * Mean-luminance fallback for when the image call's text response is
+ * missing or doesn't carry a parseable COLOR_CHOICE line (the Imagen path
+ * never returns text at all; the flash-image model occasionally drops the
+ * line). Measures the actual non-transparent ink pixels of the rendered
+ * art: light ink implies it was drawn to read on a black garment, dark ink
+ * implies white — deterministic given the same pixels, so this stays
+ * self-consistent with what's actually on screen even without the model's
+ * own self-report.
+ */
+export async function resolveGarmentColorFromLuminance(imageB64: string): Promise<"Black" | "White"> {
+  const meanLuminance = await measureInkLuminance(imageB64);
+
   // No ink pixels found at all (e.g. a fully transparent/blank render) —
   // default to Black, matching the old isDarkGarment() default.
-  if (count === 0) return "Black";
+  if (meanLuminance === null) return "Black";
 
-  const meanLuminance = sum / count;
   // Light ink (high mean luminance) was drawn to read on a dark garment;
   // dark ink (low mean luminance) was drawn to read on a light garment.
   return meanLuminance > 127.5 ? "Black" : "White";
