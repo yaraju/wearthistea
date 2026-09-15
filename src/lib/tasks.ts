@@ -302,3 +302,57 @@ export async function enqueueDesignRegenerate(designId: string, verdict: JudgeVe
   });
   return true;
 }
+
+/**
+ * Queue one step of a bulk judge run (issue #19) — advances exactly one
+ * design via src/lib/judge-run.ts's advanceJudgeRun(), dispatched by
+ * /api/tasks/judge-run-step, which re-enqueues itself (self-chaining, same
+ * shape as the judge -> fix/regenerate -> judge loop above) until the run's
+ * processed count reaches its total. Started once by
+ * POST /api/admin/judge-runs (the admin "Start run" action) rather than
+ * driven synchronously inside that request — a bulk sweep over more than a
+ * handful of designs, each a real Gemini call and sometimes a full sibling
+ * render, would run well past the ~60s Firebase Hosting proxy timeout
+ * otherwise (same reasoning as every other queue in this file).
+ *
+ * Deliberately NO synchronous fallback when CLOUD_TASKS_QUEUE_JUDGE_RUN
+ * isn't configured — same reasoning as enqueueDesignFix/
+ * enqueueDesignRegenerate: running a bulk sweep inline would reintroduce
+ * exactly the timeout risk this queue exists to avoid. The admin route
+ * (POST /api/admin/judge-runs) marks the run "failed" with a clear error
+ * when this returns false, rather than leaving it stuck at "running" with
+ * nothing to ever advance it.
+ */
+export async function enqueueJudgeRunStep(runId: string): Promise<boolean> {
+  const queueName = process.env.CLOUD_TASKS_QUEUE_JUDGE_RUN;
+  const siteUrl = process.env.SITE_URL;
+  const sharedSecret = process.env.TASKS_SHARED_SECRET;
+
+  if (!queueName || !siteUrl || !sharedSecret) {
+    logger.info("[tasks] Judge-run queue not configured — bulk run left with nothing to advance it", { runId });
+    return false;
+  }
+
+  const projectId = process.env.GCP_PROJECT_ID || "wearthistea";
+  const location = process.env.GCP_REGION || "us-central1";
+
+  if (!client) client = new CloudTasksClient();
+  const parent = client.queuePath(projectId, location, queueName);
+
+  await client.createTask({
+    parent,
+    task: {
+      // One design's worth of work: a judge call plus (auto mode only, on a
+      // failure) a full sibling create+render — same budget as
+      // regenerate-design above.
+      dispatchDeadline: { seconds: 5 * 60 },
+      httpRequest: {
+        httpMethod: "POST",
+        url: `${siteUrl.replace(/\/$/, "")}/api/tasks/judge-run-step`,
+        headers: { "Content-Type": "application/json", "X-Task-Secret": sharedSecret },
+        body: Buffer.from(JSON.stringify({ runId })).toString("base64"),
+      },
+    },
+  });
+  return true;
+}

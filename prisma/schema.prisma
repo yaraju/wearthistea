@@ -453,3 +453,58 @@ model RateLimitOverride {
   updatedAt      DateTime @updatedAt
   updatedByEmail String?
 }
+
+// Bulk judge-run tracking (issue #19) — a lightweight record of one
+// admin-triggered bulk sweep over the same judgeOneDesign() core
+// scripts/judge-designs.ts (issue #18) uses, so the admin UI can poll live
+// progress instead of shelling in to watch a CLI. Checked first for an
+// existing job-tracking pattern to reuse (per issue #19's own instruction):
+// Counter is a single-int KV, Cache is a generic TTL string KV — neither
+// fits a run's shape (counts + JSON breakdowns + a frozen mode), so this is
+// new, additive-only, no changes to any existing table.
+model JudgeRun {
+  id String @id @default(cuid())
+
+  // "auto" (apply=true — a passing design validates in place, a failing
+  // eligible one auto-regenerates a sibling, an excluded one is flagged) |
+  // "manual" (apply=false — nothing is written automatically; every judge
+  // failure is surfaced for an explicit per-design "regenerate" click).
+  // Frozen for the life of the run: src/lib/judge-run.ts's
+  // advanceJudgeRun() always derives `apply` from THIS persisted column,
+  // never from a step's task payload, and no route ever updates it once the
+  // row exists (PATCH /api/admin/judge-runs/[id] always 409s).
+  mode         String
+  statusFilter String
+  limit        Int
+
+  // "running" | "completed" | "failed" — never returns to "running" once
+  // it leaves that state.
+  status String @default("running")
+
+  // JSON string[] — the exact Design ids in scope, snapshotted once at
+  // creation (same orderBy as scripts/judge-designs.ts: createdAt asc, id
+  // asc) so a per-step re-query never sees a shifting window as designs'
+  // validationStatus changes mid-run (auto mode moves designs OUT of the
+  // very filter that selected them).
+  designIds String @db.Text
+  total     Int
+  processed Int    @default(0)
+
+  // JSON Record<JudgeOneOutcome, number>, accumulated incrementally.
+  outcomeCounts String @db.Text @default("{}")
+  // JSON BulkDesignVerdict[] (design-judge-bulk.ts) accumulated
+  // incrementally — buildRubricReport()/formatRubricSummary() (issue #17)
+  // are recomputed from this on read, so the five named rubrics' pass rates
+  // can never drift from the CLI script's own reporting logic.
+  verdicts String @db.Text @default("[]")
+  // JSON FlaggedDesignEntry[] (src/lib/judge-run.ts) — designs whose
+  // outcome needs admin attention: excluded-and-flagged (either mode) or,
+  // in manual mode only, every judge failure (since nothing auto-fixes).
+  flagged String @db.Text @default("[]")
+
+  error       String?   @db.Text
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  createdByEmail String?
+}

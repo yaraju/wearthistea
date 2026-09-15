@@ -61,6 +61,9 @@ jobs:
           JUDGE_QUEUE: design-judge
           FIX_QUEUE: design-fix
           REGENERATE_QUEUE: design-regenerate
+          # Bulk judge run (issue #19) — same reasoning as the four above:
+          # a non-secret, literal queue name.
+          JUDGE_RUN_QUEUE: design-judge-run
         run: |
           gcloud services enable cloudtasks.googleapis.com --project="${{ env.PROJECT_ID }}"
 
@@ -163,6 +166,21 @@ jobs:
             --max-concurrent-dispatches=5 \
             --max-dispatches-per-second=3
 
+          # Judge-run step (issue #19): one design's worth of work per task
+          # (a judge call, plus — auto mode only, on a failure — the same
+          # regenerate cost as REGENERATE_QUEUE above), self-chained one
+          # step at a time by /api/tasks/judge-run-step, so low concurrency
+          # is fine — a bulk run's own pace is bounded by its own admin-
+          # chosen --limit, not by how fast this queue can fan out.
+          ensure_queue "$JUDGE_RUN_QUEUE" \
+            --max-attempts=4 \
+            --max-retry-duration=1800s \
+            --min-backoff=10s \
+            --max-backoff=120s \
+            --max-doublings=4 \
+            --max-concurrent-dispatches=3 \
+            --max-dispatches-per-second=3
+
       - name: Prepare Env Vars
         id: prep
         shell: bash
@@ -228,6 +246,7 @@ jobs:
             CLOUD_TASKS_QUEUE_JUDGE=design-judge
             CLOUD_TASKS_QUEUE_FIX=design-fix
             CLOUD_TASKS_QUEUE_REGENERATE=design-regenerate
+            CLOUD_TASKS_QUEUE_JUDGE_RUN=design-judge-run
             GCP_PROJECT_ID=${{ env.PROJECT_ID }}
             GCP_REGION=${{ env.REGION }}
             SITE_URL=${{ secrets.SITE_URL }}

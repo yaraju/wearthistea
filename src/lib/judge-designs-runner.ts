@@ -121,6 +121,17 @@ export interface JudgeOneResult {
    * why `passed` alone reads as "half the catalog is broken" for rows that
    * simply predate a feature. */
   integrityDetail?: { hasLostObjects: boolean; hasMissingFields: boolean };
+  /** The full color-fitness/garment-in-graphic verdict from judgeFn — set
+   * whenever the judge call actually ran (every outcome except an early
+   * "skipped" return before judgeFn was ever called). Exposed so a caller
+   * with its own out-of-band action to trigger LATER (issue #19's admin UI:
+   * a manual-mode "regenerate this flagged design" button, clicked well
+   * after this judgeOneDesign() call returned) can build the exact same
+   * regeneration edit regenerateDesignSibling()/runRegenerateStep() would
+   * have used automatically — without spending a second judge call (a
+   * second Gemini round-trip that could even come back with a different
+   * verdict) just to reconstruct it. */
+  judgeVerdict?: JudgeVerdict;
 }
 
 export interface JudgeOneDeps {
@@ -287,6 +298,7 @@ export async function judgeOneDesign(
       detail: "passes color-fitness and garment-in-graphic as-is",
       verdict,
       integrityDetail,
+      judgeVerdict,
     };
   }
 
@@ -299,6 +311,7 @@ export async function judgeOneDesign(
       detail: `judge failed (${issueSummary}) but excluded from auto-fix: ${exclusion.reasons.join("; ")}`,
       verdict,
       integrityDetail,
+      judgeVerdict,
     };
   }
 
@@ -309,21 +322,11 @@ export async function judgeOneDesign(
       detail: `judge failed (${issueSummary}) — would create a regenerated sibling and mark this row "superseded"`,
       verdict,
       integrityDetail,
+      judgeVerdict,
     };
   }
 
-  // Move the original into "regenerating" ourselves (runJudgeStep would
-  // normally do this as part of its fix-vs-regenerate routing, which this
-  // module deliberately bypasses — see top doc comment) so
-  // runRegenerateStep()'s own precondition (source must be "regenerating"
-  // unless a sibling already exists from a prior partial run) is satisfied.
-  await store.update(design.id, {
-    validationStatus: "regenerating",
-    validationRegenAttempts: design.validationRegenAttempts + 1,
-    validationNotes: summarizeVerdict(judgeVerdict),
-  });
-
-  const regenResult = await runRegenerateStep(design.id, judgeVerdict, { store, renderFn: deps.renderFn });
+  const regenResult = await regenerateDesignSibling(design, judgeVerdict, { store, renderFn: deps.renderFn });
 
   // Distinct outcome for a render failure (rather than folding it into
   // "sibling-created") — the sibling row DOES exist and the original IS
@@ -340,5 +343,59 @@ export async function judgeOneDesign(
     verdict,
     siblingId: regenResult.siblingId,
     integrityDetail,
+    judgeVerdict,
   };
+}
+
+/**
+ * Moves a design into "regenerating" and creates+renders its sibling — the
+ * exact action judgeOneDesign() takes on an --apply judge failure (extracted
+ * here, issue #19, so the admin UI's manual-mode "regenerate this flagged
+ * design" button can trigger THE SAME action, admin-triggered per item
+ * instead of automatically, reusing this instead of forking a second copy of
+ * it). `judgeVerdict` is normally the one judgeOneDesign()'s own call to
+ * judgeFn just produced (see JudgeOneResult.judgeVerdict) — for a manual
+ * trigger, called well after that judge pass returned, the caller passes the
+ * SAME stored verdict back in rather than spending a second Gemini call to
+ * reconstruct it.
+ *
+ * Precondition (mirrors judgeOneDesign()'s own inline comment this replaces):
+ * runRegenerateStep()'s precondition is that the source is already
+ * "regenerating" (unless a sibling already exists from a prior partial run)
+ * — this function satisfies that itself before calling it.
+ */
+export async function regenerateDesignSibling(
+  design: Design,
+  judgeVerdict: JudgeVerdict,
+  deps: { store?: DesignStore; renderFn?: RegenerateStepDeps["renderFn"] } = {}
+) {
+  const store = deps.store ?? prismaDesignStore;
+  await markDesignRegenerating(design, judgeVerdict, { store });
+  return runRegenerateStep(design.id, judgeVerdict, { store, renderFn: deps.renderFn });
+}
+
+/**
+ * Just the "claim this design for regeneration" half of
+ * regenerateDesignSibling() above, split out (issue #19) for a caller that
+ * needs to enqueue the actual sibling create+render as an async Cloud Tasks
+ * step (POST /api/admin/judge-runs/[id]/flagged/[designId]/regenerate,
+ * reusing tasks.ts's existing enqueueDesignRegenerate()/
+ * /api/tasks/regenerate-design — the same task that already does this
+ * render for the live judge/fix/regenerate chain, issue #13) rather than
+ * calling runRegenerateStep() — and its default renderFn's real Gemini
+ * call — synchronously inside a browser-facing admin request, which risks
+ * the same ~60s Firebase Hosting proxy timeout every other route in this
+ * repo works around by splitting create-fast from render-slow.
+ */
+export async function markDesignRegenerating(
+  design: Design,
+  judgeVerdict: JudgeVerdict,
+  deps: { store?: DesignStore } = {}
+): Promise<Design> {
+  const store = deps.store ?? prismaDesignStore;
+  return store.update(design.id, {
+    validationStatus: "regenerating",
+    validationRegenAttempts: design.validationRegenAttempts + 1,
+    validationNotes: summarizeVerdict(judgeVerdict),
+  });
 }

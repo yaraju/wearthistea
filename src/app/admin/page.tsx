@@ -154,6 +154,12 @@ function AdminQueue({ onSignOut }: { onSignOut: () => void }) {
             >
               Rate limits
             </Link>
+            <Link
+              href="/admin/judge-runs"
+              className="inline-flex cursor-pointer items-center gap-2 rounded-full border-2 border-paper px-4 py-2 font-mono text-xs uppercase tracking-wider transition-colors duration-200 hover:bg-paper hover:text-ink"
+            >
+              Judge runs
+            </Link>
             <button
               onClick={load}
               className="inline-flex cursor-pointer items-center gap-2 rounded-full border-2 border-paper px-4 py-2 font-mono text-xs uppercase tracking-wider transition-colors duration-200 hover:bg-paper hover:text-ink"
