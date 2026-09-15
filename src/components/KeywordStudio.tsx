@@ -8,7 +8,7 @@ import { getColorCode } from "@/lib/colors";
 import { friendlyError } from "@/lib/error-messages";
 import { track } from "@/lib/analytics";
 import { getAnonId, ANON_ID_HEADER } from "@/lib/anon-id";
-import { shouldStopPolling, isValidationInFlight } from "@/lib/validation-status";
+import { shouldStopPolling, isValidationInFlight, mergePolledDesigns } from "@/lib/validation-status";
 import PickDesignModal from "@/components/PickDesignModal";
 import ReviewBadge from "@/components/ReviewBadge";
 
@@ -241,13 +241,11 @@ export default function KeywordStudio() {
         if (!prev || prev.batchId !== batchId) return prev;
         return {
           ...prev,
-          designs: prev.designs.map((d) => {
-            const updated = data.designs.find((nd) => nd.id === d.id);
-            // Preserve fields the status endpoint doesn't carry (e.g. slug,
-            // set once at creation) by spreading onto the existing card
-            // rather than replacing it outright.
-            return updated ? { ...d, ...updated } : d;
-          }),
+          // See mergePolledDesigns()'s doc comment (issue #32) — swaps a
+          // slot whose polled validationStatus is "superseded" for its
+          // resolved latest sibling instead of leaving the stale original
+          // in place.
+          designs: mergePolledDesigns(prev.designs, data.designs),
         };
       });
       // Stop once every design's rendering AND its validation
@@ -312,7 +310,15 @@ export default function KeywordStudio() {
         if (!res.ok) return;
         const data = (await res.json()) as GenerateResponse;
         setKeyword(saved.keyword);
-        setResult(data);
+        // Self-merge through mergePolledDesigns() rather than setting the
+        // raw payload directly — this is a raw /api/generate/status
+        // response (every row for the batch, siblings included), and a
+        // chain that already fully settled before this reload (no design
+        // left in flight) never reaches pollBatchStatus() at all, so this
+        // is the ONLY place that would ever resolve/dedupe it (issue #32).
+        // Every row resolves to itself when nothing was superseded, so this
+        // is a no-op in the common case.
+        setResult({ ...data, designs: mergePolledDesigns(data.designs, data.designs) });
         setPhase("done");
         fetchPreBrewed(saved.keyword);
         // Same stop condition as pollBatchStatus() — a design that's

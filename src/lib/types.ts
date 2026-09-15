@@ -52,6 +52,12 @@ export interface DesignDTO {
   // absent should be treated the same as "unjudged" (no badge, not in
   // flight — see isValidationInFlight()).
   validationStatus?: string;
+  // Set on a sibling row created by the judge/fix/regenerate chain (issue
+  // #13) to link it back to the design it superseded. Always present on the
+  // wire (the row's own column, never stripped by /api/generate/status) —
+  // typed here so KeywordStudio.tsx's mergePolledDesigns() (issue #32) can
+  // walk it without an `any`/cast.
+  regeneratedFromDesignId?: string | null;
 }
 
 // One entry in a Design's version-chain lineage (issue #20) — admin-only
