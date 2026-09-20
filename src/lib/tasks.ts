@@ -6,6 +6,21 @@ import type { JudgeVerdict } from "./design-judge";
 
 let client: CloudTasksClient | null = null;
 
+/**
+ * Base URL Cloud Tasks dispatches to. Prefers TASKS_TARGET_URL (the Cloud Run
+ * service URL, set by deploy.yml) over SITE_URL (the Firebase Hosting front
+ * door). Issue #33: Firebase Hosting proxies to Cloud Run with a ~60s cutoff,
+ * so a render task that legitimately runs 70-95s got a 504 from the proxy,
+ * Cloud Tasks redelivered it while the first delivery was still running
+ * (Langfuse showed 3-4 render-design-task traces per design, ~70s apart), and
+ * every duplicate delivery enqueued its own judge chain and finally hit the
+ * rate limit. Tasks are authenticated by X-Task-Secret, not by the hosting
+ * layer, so they can go straight to Cloud Run.
+ */
+function taskBaseUrl(): string | undefined {
+  return process.env.TASKS_TARGET_URL || process.env.SITE_URL;
+}
+
 /** Queue an email to be sent by /api/tasks/send-email instead of awaiting
  * SendGrid inline — mirrors the precedent already set by splitting
  * /api/generate into two stages to work around Firebase Hosting's ~60s
@@ -20,7 +35,7 @@ let client: CloudTasksClient | null = null;
  * workloads want different retry/concurrency tuning; see deploy.yml. */
 export async function enqueueEmail(payload: EmailPayload): Promise<void> {
   const queueName = process.env.CLOUD_TASKS_QUEUE_EMAIL;
-  const siteUrl = process.env.SITE_URL;
+  const siteUrl = taskBaseUrl();
   const sharedSecret = process.env.TASKS_SHARED_SECRET;
 
   if (!queueName || !siteUrl || !sharedSecret) {
@@ -63,7 +78,7 @@ export async function enqueueEmail(payload: EmailPayload): Promise<void> {
  * same ensureDesignProduct() on demand, so nothing is lost, only delayed. */
 export async function enqueuePrintroveProducts(designId: string): Promise<void> {
   const queueName = process.env.CLOUD_TASKS_QUEUE_PRINTROVE;
-  const siteUrl = process.env.SITE_URL;
+  const siteUrl = taskBaseUrl();
   const sharedSecret = process.env.TASKS_SHARED_SECRET;
 
   if (!queueName || !siteUrl || !sharedSecret) {
@@ -122,7 +137,7 @@ export async function enqueuePrintroveProducts(designId: string): Promise<void> 
  */
 export async function enqueueDesignRender(designId: string, rateLimit: RateLimitResult): Promise<boolean> {
   const queueName = process.env.CLOUD_TASKS_QUEUE_RENDER;
-  const siteUrl = process.env.SITE_URL;
+  const siteUrl = taskBaseUrl();
   const sharedSecret = process.env.TASKS_SHARED_SECRET;
 
   if (!queueName || !siteUrl || !sharedSecret) {
@@ -172,7 +187,7 @@ export async function enqueueDesignRender(designId: string, rateLimit: RateLimit
  */
 export async function enqueueDesignJudge(designId: string): Promise<boolean> {
   const queueName = process.env.CLOUD_TASKS_QUEUE_JUDGE;
-  const siteUrl = process.env.SITE_URL;
+  const siteUrl = taskBaseUrl();
   const sharedSecret = process.env.TASKS_SHARED_SECRET;
 
   if (!queueName || !siteUrl || !sharedSecret) {
@@ -221,7 +236,7 @@ export async function enqueueDesignJudge(designId: string): Promise<boolean> {
  */
 export async function enqueueDesignFix(designId: string, verdict: JudgeVerdict): Promise<boolean> {
   const queueName = process.env.CLOUD_TASKS_QUEUE_FIX;
-  const siteUrl = process.env.SITE_URL;
+  const siteUrl = taskBaseUrl();
   const sharedSecret = process.env.TASKS_SHARED_SECRET;
 
   if (!queueName || !siteUrl || !sharedSecret) {
@@ -270,7 +285,7 @@ export async function enqueueDesignFix(designId: string, verdict: JudgeVerdict):
  */
 export async function enqueueDesignRegenerate(designId: string, verdict: JudgeVerdict): Promise<boolean> {
   const queueName = process.env.CLOUD_TASKS_QUEUE_REGENERATE;
-  const siteUrl = process.env.SITE_URL;
+  const siteUrl = taskBaseUrl();
   const sharedSecret = process.env.TASKS_SHARED_SECRET;
 
   if (!queueName || !siteUrl || !sharedSecret) {
@@ -325,7 +340,7 @@ export async function enqueueDesignRegenerate(designId: string, verdict: JudgeVe
  */
 export async function enqueueJudgeRunStep(runId: string): Promise<boolean> {
   const queueName = process.env.CLOUD_TASKS_QUEUE_JUDGE_RUN;
-  const siteUrl = process.env.SITE_URL;
+  const siteUrl = taskBaseUrl();
   const sharedSecret = process.env.TASKS_SHARED_SECRET;
 
   if (!queueName || !siteUrl || !sharedSecret) {

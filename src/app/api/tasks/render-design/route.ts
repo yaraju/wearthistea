@@ -27,6 +27,40 @@ const Body = z.object({
 // browser no longer has to stay open for it (see enqueueDesignRender's doc
 // comment); /api/generate/retry remains for the customer-facing manual
 // "Retry Render" button on an already-failed card.
+/**
+ * Moves an already-rendered design into the judge chain. Claims
+ * unjudged -> "pending" BEFORE enqueueing (issue #33) — the old
+ * enqueue-then-unconditionally-write-"pending" order could overwrite a
+ * status the judge task had already advanced (or resurrect a superseded
+ * row) — and rolls the claim back if nothing was queued. Idempotent: a row
+ * that isn't "unjudged" any more is left alone. Never throws: an enqueue
+ * failure leaves the row "unjudged", which is a valid settled state (and a
+ * redelivery of this task will simply try the hand-off again).
+ */
+async function handOffToJudge(designId: string) {
+  try {
+    const claimed = await prisma.design.updateMany({
+      where: { id: designId, validationStatus: "unjudged" },
+      data: { validationStatus: "pending" },
+    });
+    if (claimed.count === 0) return;
+    let queued = false;
+    try {
+      queued = await enqueueDesignJudge(designId);
+    } finally {
+      if (!queued) {
+        await prisma.design.updateMany({
+          where: { id: designId, validationStatus: "pending" },
+          data: { validationStatus: "unjudged" },
+        });
+      }
+    }
+    if (!queued) logger.info("[render-design task] Judge queue not configured — design left unjudged", { designId });
+  } catch (err) {
+    logger.error("[render-design task] Failed to hand off to judge (design left unjudged)", { designId, error: err });
+  }
+}
+
 export async function POST(req: Request) {
   const secret = req.headers.get("x-task-secret");
   if (!process.env.TASKS_SHARED_SECRET || secret !== process.env.TASKS_SHARED_SECRET) {
@@ -56,6 +90,18 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Design not found." }, { status: 200 });
   }
 
+  // Idempotency (issues #31/#33): a redelivered/duplicate task for a design
+  // that already rendered must NOT re-render it, re-spend the rate-limit
+  // bucket, overwrite status with a rate-limit "failed", or reset a
+  // validationStatus the judge chain has since moved on. Only "generating"
+  // (fresh) and "failed" (a transient-failure redelivery, which the row was
+  // marked with as a safety net) still need rendering. For an already
+  // rendered design just resume the hand-off to judge if it never happened.
+  if (design.status === "generated") {
+    await handOffToJudge(designId);
+    return NextResponse.json({ ok: true, skipped: true });
+  }
+
   // Re-check the caller's budget against the CURRENT live count — the
   // identity was resolved back in /api/generate, but this task may run
   // seconds to minutes later and possibly after sibling designs in the same
@@ -63,9 +109,11 @@ export async function POST(req: Request) {
   // fresh /api/generate/retry call would do for this same design.
   const rateLimit = await reevaluateRateLimit(body.rateLimit);
   if (!rateLimit.ok) {
+    // Conditional (issue #31): only a design still awaiting its render may be
+    // flipped to "failed" — never one that has rendered since.
     await prisma.design
-      .update({
-        where: { id: designId },
+      .updateMany({
+        where: { id: designId, status: { in: ["generating", "failed"] } },
         data: {
           status: "failed",
           errorMessage: "You've hit the free-generation limit for now — try again in a bit.",
@@ -91,24 +139,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: result.error }, { status: result.transient ? 503 : 200 });
   }
 
-  // Art rendered successfully — hand off to the judge chain (issue #13)
-  // instead of finishing here. Only advance validationStatus to "pending"
-  // if the judge task was actually queued — see enqueueDesignJudge's doc
-  // comment (src/lib/tasks.ts): with no judge queue configured (local dev),
-  // the design is simply left unjudged, a valid settled state.
-  try {
-    const queued = await enqueueDesignJudge(designId);
-    if (queued) {
-      await prisma.design.update({ where: { id: designId }, data: { validationStatus: "pending" } });
-    } else {
-      logger.info("[render-design task] Judge queue not configured — design left unjudged", { designId });
-    }
-  } catch (err) {
-    logger.error("[render-design task] Failed to enqueue judge task (design left unjudged)", {
-      designId,
-      error: err,
-    });
-  }
+  // Art rendered successfully — hand off to the judge chain (issue #13).
+  await handOffToJudge(designId);
 
   return NextResponse.json({ ok: true });
 }

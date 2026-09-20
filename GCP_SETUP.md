@@ -136,6 +136,37 @@ Add the following secrets to your GitHub repository:
   auto-created/reconciled on every deploy the same way the two queues above
   are.
 
+### Task dispatch target (`TASKS_TARGET_URL`, issue #33)
+Cloud Tasks handlers are dispatched to `TASKS_TARGET_URL` (the Cloud Run service
+URL, resolved automatically by `deploy.yml`'s "Prepare Env Vars" step) and only
+fall back to `SITE_URL` when it is unset. Going through Firebase Hosting
+(`SITE_URL`) cuts requests off at ~60s with a 504, which made Cloud Tasks
+redeliver slow renders (70-95s) while the first delivery was still running.
+No secret to add; the deploy service account needs
+`run.services.get` (already implied by `roles/run.admin`).
+
+### Stuck-row sweeper (Cloud Scheduler, issue #33)
+`deploy.yml`'s "Ensure stuck-row sweeper schedule" step creates/updates a
+Cloud Scheduler job, `sweep-stuck-validation` (every 10 minutes), that POSTs
+`${SITE_URL}/api/tasks/sweep-stuck-validation` with the same
+`X-Task-Secret: $TASKS_SHARED_SECRET` header the Cloud Tasks handlers use. The
+endpoint (`src/lib/validation-sweeper.ts`) finds designs whose
+`validationStatus` has sat in `pending | validating | regenerating` for over
+30 minutes with no write, retries them once (re-enqueues the judge), and marks
+them `rejected` (with a `validationNotes` reason) if that retry stalls too.
+No new env var or repo secret is needed. The deploy service account needs
+`roles/cloudscheduler.admin` (the step only warns, it does not fail the
+deploy, if that role is missing):
+```bash
+gcloud projects add-iam-policy-binding <PROJECT_ID> \
+    --member="serviceAccount:<GITHUB_ACTIONS_DEPLOY_SA>" \
+    --role="roles/cloudscheduler.admin"
+```
+Handlers also read `X-CloudTasks-TaskRetryCount` and end a row terminally on
+the queue's final attempt; the per-queue `--max-attempts` values in
+`deploy.yml` are mirrored in `src/lib/task-retry.ts` (`QUEUE_MAX_ATTEMPTS`) —
+change both together.
+
 ## 6. Cloud Run Service Account
 Ensure the default Compute Engine service account (or the one used by Cloud Run) has `Storage Object Admin` permissions for the GCS bucket.
 

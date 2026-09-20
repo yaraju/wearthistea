@@ -64,6 +64,16 @@
  * exactly what "never loop further" (this issue's validation criterion)
  * forbids. The cap is lineage-wide, not per-row.
  *
+ * ── Issue #33 amendments (stranded "regenerating" rows) ──────────────────
+ * "regenerating" now means "a fix/regenerate task owns this row" and is NOT
+ * judge-claimable: runFixStep() CASes it to "pending" before judge is
+ * re-enqueued, and runRegenerateStep() creates the sibling + supersedes the
+ * source in ONE transaction (DesignStore.createSiblingAndSupersede). The
+ * routing never sends a non-programmatic verdict to the fix queue. Every
+ * step has an abandon* helper the route calls on the queue's final delivery
+ * (src/lib/task-retry.ts), and src/lib/validation-sweeper.ts is the
+ * backstop for anything still stuck in pending|validating|regenerating.
+ *
  * ── Idempotency / retry tradeoff (documented, not fixed here) ────────────
  * Each step uses DesignStore.claim() — a compare-and-swap
  * (`UPDATE ... WHERE id = ? AND validationStatus IN (...)`) — so a Cloud
@@ -131,6 +141,14 @@ export interface DesignStore {
    * /api/admin/designs/[id]/regenerate/route.ts and
    * design-judge-bulk.ts's flagAndTriggerStuckDesign(). */
   create(data: Prisma.DesignUncheckedCreateInput): Promise<Design>;
+  /** Atomically (issue #33): flips `sourceId` from "regenerating" to
+   * "superseded" AND creates the sibling, in one transaction. Returns null
+   * (creating nothing) when the source isn't "regenerating" any more — a
+   * late/duplicate regenerate task, so exactly one live chain exists per
+   * lineage. Optional so pre-existing fakes (judge-run/judge-designs
+   * tests) that only implement create() keep working; runRegenerateStep
+   * falls back to a claim()-then-create() ordering when absent. */
+  createSiblingAndSupersede?(sourceId: string, data: Prisma.DesignUncheckedCreateInput): Promise<Design | null>;
 }
 
 export const prismaDesignStore: DesignStore = {
@@ -158,6 +176,17 @@ export const prismaDesignStore: DesignStore = {
   async create(data) {
     const { prisma } = await import("./prisma");
     return prisma.design.create({ data });
+  },
+  async createSiblingAndSupersede(sourceId, data) {
+    const { prisma } = await import("./prisma");
+    return prisma.$transaction(async (tx) => {
+      const flipped = await tx.design.updateMany({
+        where: { id: sourceId, validationStatus: "regenerating" },
+        data: { validationStatus: "superseded" },
+      });
+      if (flipped.count === 0) return null;
+      return tx.design.create({ data });
+    });
   },
 };
 
@@ -201,10 +230,12 @@ function summarizeVerdict(verdict: JudgeVerdict): string {
 
 /** validationStatus values from which a judge pass may run. Includes
  * "validating" itself (a redrivable retry of a dispatch that crashed
- * mid-judge — see this module's top doc comment) and "regenerating" (the
- * state fix-design/regenerate-design leave the row/sibling in right before
- * re-enqueuing judge). */
-const JUDGE_CLAIMABLE_STATUSES = ["pending", "unjudged", "regenerating", "validating"] as const;
+ * mid-judge — see this module's top doc comment). Deliberately does NOT
+ * include "regenerating" (issue #33): that status now means "a fix or
+ * regenerate task owns this row", and fix-design moves the row to "pending"
+ * before re-enqueuing judge, so a duplicate/late judge task can no longer
+ * re-claim a row a fix/regenerate task is working and start a second chain. */
+const JUDGE_CLAIMABLE_STATUSES = ["pending", "unjudged", "validating"] as const;
 
 export type ChainAction =
   | { type: "validated" }
@@ -262,10 +293,16 @@ export async function runJudgeStep(designId: string, deps: JudgeStepDeps = {}): 
 
   // See this module's top doc comment ("Attempt-cap routing policy") for
   // the full rationale.
+  //
+  // Issue #33: falling back to the OTHER budget is only valid when it can
+  // actually act on this verdict. A cheap fix only applies when verdict.fix
+  // names a programmatic fix — the old "regen budget spent, canFix -> fix"
+  // fallback enqueued fix-design for verdict.fix "regenerate"/"none", which
+  // applyProgrammaticFix() can only throw on, permanently, until Cloud Tasks
+  // gave up and the row sat at "regenerating" forever (the root cause of
+  // prod batch cmu8ocut8...). Nothing cheap applies there: reject instead.
   let route: "fix" | "regenerate" | "rejected";
   if (wantsFix && canFix) route = "fix";
-  else if (!wantsFix && canRegen) route = "regenerate";
-  else if (canFix) route = "fix";
   else if (canRegen) route = "regenerate";
   else route = "rejected";
 
@@ -323,16 +360,141 @@ export async function runFixStep(
     return { ok: true, skipped: true };
   }
 
+  if (verdict.fix !== "relabel" && verdict.fix !== "invert-ink" && verdict.fix !== "rerun-bg-removal") {
+    // Permanent, not transient (issue #33): no retry can make a
+    // non-programmatic verdict fixable, so don't burn the queue's retry
+    // budget (and strand the row when it runs out) — end the row now.
+    await abandonStep(store, designId, "regenerating", `Fix step given a non-programmatic verdict (fix="${verdict.fix}").`);
+    return { ok: true, skipped: true };
+  }
+
   try {
     await applyFix(design, verdict);
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
 
-  // Deliberately left at "regenerating" — that's judge-design's own
-  // claimable entry state, and the caller (fix-design/route.ts)
-  // re-enqueues judge right after this returns ok.
+  // Hand the row back to the judge's claimable state BEFORE the caller
+  // re-enqueues judge (issue #33): "regenerating" means "a fix/regenerate
+  // task owns this row" and is no longer judge-claimable, so this CAS is
+  // also what makes a duplicate/late fix task (or one whose row was
+  // superseded/swept meanwhile) a no-op instead of a second judge enqueue.
+  const handedBack = await store.claim(designId, ["regenerating"], { validationStatus: "pending" });
+  if (!handedBack) return { ok: true, skipped: true };
   return { ok: true };
+}
+
+/**
+ * Ends a row that a failed/exhausted task can no longer advance (issue #33)
+ * so it is never stranded in an in-flight status. CAS on `fromStatus` so it
+ * never clobbers a row another task already moved on. `to` defaults to
+ * "rejected"; the judge step uses "unjudged" (art untouched, just never
+ * judged — a valid settled state).
+ */
+export async function abandonStep(
+  store: DesignStore,
+  designId: string,
+  fromStatus: string,
+  reason: string,
+  to: "rejected" | "unjudged" = "rejected"
+): Promise<boolean> {
+  const row = await store.claim(designId, [fromStatus], {
+    validationStatus: to,
+    validationNotes: `[chain] ${reason}`.slice(0, 4000),
+  });
+  if (row) logger.error(`[validation-chain] Row ${designId} ended as "${to}": ${reason}`, { designId });
+  return Boolean(row);
+}
+
+/** Final-retry hook for fix-design (issue #33): the queue is about to stop
+ * redelivering, so end the row rather than leave it at "regenerating". */
+export async function abandonFixStep(designId: string, reason: string, store: DesignStore = prismaDesignStore) {
+  return abandonStep(store, designId, "regenerating", `Fix failed after retries: ${reason}`);
+}
+
+/** Final-retry hook for judge-design (issue #33): leave the row "unjudged". */
+export async function abandonJudgeStep(designId: string, reason: string, store: DesignStore = prismaDesignStore) {
+  return abandonStep(store, designId, "validating", `Judge failed after retries: ${reason}`, "unjudged");
+}
+
+/** Final-retry hook for regenerate-design (issue #33): the sibling exists
+ * (source already superseded) but could never be rendered — mark it failed
+ * and rejected so the lineage ends terminal instead of "pending" forever. */
+export async function abandonRegenerateStep(
+  sourceId: string,
+  reason: string,
+  store: DesignStore = prismaDesignStore
+): Promise<boolean> {
+  const sibling = await store.findByRegeneratedFrom(sourceId);
+  if (!sibling) {
+    // Sibling never got created: the source is still "regenerating".
+    return abandonStep(store, sourceId, "regenerating", `Regeneration failed after retries: ${reason}`);
+  }
+  const row = await store.claim(sibling.id, ["pending", "validating"], {
+    status: sibling.status === "generated" ? sibling.status : "failed",
+    errorMessage: sibling.status === "generated" ? sibling.errorMessage : reason.slice(0, 1000),
+    validationStatus: "rejected",
+    validationNotes: `[chain] Regeneration failed after retries: ${reason}`.slice(0, 4000),
+  });
+  return Boolean(row);
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Judge + route: judge, then enqueue the next queue, rolling the row back if
+// the enqueue fails (issue #33) so a retry can resume instead of no-op'ing
+// on a row already flipped to "regenerating".
+// ─────────────────────────────────────────────────────────────────────────
+
+export interface JudgeAndRouteDeps extends JudgeStepDeps {
+  enqueueFix: (designId: string, verdict: JudgeVerdict) => Promise<boolean>;
+  enqueueRegenerate: (designId: string, verdict: JudgeVerdict) => Promise<boolean>;
+}
+
+/**
+ * runJudgeStep() + dispatching its enqueue-fix/enqueue-regenerate action.
+ * If the enqueue throws, the row is rolled back to "validating" with the
+ * attempt counter it just consumed given back, then the error is rethrown
+ * (route -> 5xx -> the redelivered judge task re-claims "validating" and
+ * re-routes cleanly, instead of finding the row already at "regenerating",
+ * no-op'ing, and double-counting). If the queue simply isn't configured
+ * (returns false), nothing will ever pick the row up, so it ends "unjudged".
+ */
+export async function runJudgeAndRoute(designId: string, deps: JudgeAndRouteDeps): Promise<ChainAction> {
+  const store = deps.store ?? prismaDesignStore;
+  const action = await runJudgeStep(designId, deps);
+  if (action.type !== "enqueue-fix" && action.type !== "enqueue-regenerate") return action;
+
+  const isFix = action.type === "enqueue-fix";
+  let queued = false;
+  let enqueueError: unknown;
+  try {
+    queued = await (isFix ? deps.enqueueFix : deps.enqueueRegenerate)(designId, action.verdict);
+  } catch (err) {
+    enqueueError = err;
+  }
+  if (queued) return action;
+
+  const row = await store.findById(designId);
+  if (row && row.validationStatus === "regenerating") {
+    if (enqueueError) {
+      await store.claim(designId, ["regenerating"], {
+        validationStatus: "validating",
+        ...(isFix
+          ? { validationFixAttempts: Math.max(0, row.validationFixAttempts - 1) }
+          : { validationRegenAttempts: Math.max(0, row.validationRegenAttempts - 1) }),
+      });
+    } else {
+      await abandonStep(
+        store,
+        designId,
+        "regenerating",
+        `${isFix ? "Fix" : "Regenerate"} queue not configured — nothing to redrive this design.`,
+        "unjudged"
+      );
+    }
+  }
+  if (enqueueError) throw enqueueError;
+  return { type: "skipped", reason: `${isFix ? "fix" : "regenerate"} queue not configured` };
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -417,6 +579,24 @@ async function defaultRegenerateRenderFn(sibling: Design, source: Design, verdic
   return renderDesignArtwork(sibling, trace, rateLimit, edit);
 }
 
+/** Fallback for stores without createSiblingAndSupersede(): CAS the source
+ * "regenerating" -> "superseded" first (only one caller wins), then create,
+ * un-flipping the source if the create fails so it isn't orphaned. */
+async function createSiblingFallback(
+  store: DesignStore,
+  sourceId: string,
+  data: Prisma.DesignUncheckedCreateInput
+): Promise<Design | null> {
+  const flipped = await store.claim(sourceId, ["regenerating"], { validationStatus: "superseded" });
+  if (!flipped) return null;
+  try {
+    return await store.create(data);
+  } catch (err) {
+    await store.update(sourceId, { validationStatus: "regenerating" });
+    throw err;
+  }
+}
+
 export async function runRegenerateStep(
   designId: string,
   verdict: JudgeVerdict,
@@ -457,7 +637,7 @@ export async function runRegenerateStep(
       productPreviewImagePath: "",
     };
     assertDesignPathFieldsShape(pathFields);
-    sibling = await store.create({
+    const siblingData: Prisma.DesignUncheckedCreateInput = {
       batchId: design.batchId,
       title: concept.title,
       phrase: concept.phrase,
@@ -480,14 +660,21 @@ export async function runRegenerateStep(
       validationFixAttempts: design.validationFixAttempts,
       validationRegenAttempts: design.validationRegenAttempts,
       regeneratedFromDesignId: design.id,
-    });
+    };
+    // Issue #33: supersede the source and create the sibling ATOMICALLY,
+    // conditional on the source still being "regenerating" — a late or
+    // concurrent duplicate dispatch gets null here and no-ops instead of
+    // starting a second chain for the same lineage.
+    const created = store.createSiblingAndSupersede
+      ? await store.createSiblingAndSupersede(design.id, siblingData)
+      : await createSiblingFallback(store, design.id, siblingData);
+    if (!created) return { ok: true, skipped: true };
+    sibling = created;
+  } else if (design.validationStatus === "regenerating") {
+    // Retry after a partial prior attempt (sibling exists, source not yet
+    // flipped) — idempotent conditional flip, see above.
+    await store.claim(design.id, ["regenerating"], { validationStatus: "superseded" });
   }
-
-  // Mark the source superseded regardless of whether the sibling is new or
-  // was recovered from a retry — idempotent (a no-op UPDATE if it's already
-  // "superseded"). See this module's top doc comment for why this has to
-  // happen here, not left at "regenerating".
-  await store.update(design.id, { validationStatus: "superseded" });
 
   if (sibling.status === "generating") {
     try {

@@ -23,6 +23,12 @@
  *      retry) does not double-count attempts or re-run a judge pass on an
  *      already-terminal design.
  *
+ * Issue #33 (rows stranded at "regenerating") adds issue33Cases(): a
+ * non-programmatic verdict never reaches the fix queue, a failing/exhausted
+ * fix or regenerate ends the row terminally, a failed enqueue rolls back and
+ * stays resumable, sibling creation atomically supersedes the original
+ * (late/duplicate tasks are no-ops), and the stuck-row sweeper.
+ *
  * Usage: npx tsx scripts/test-validation-chain.ts
  * Exits non-zero if any assertion fails.
  */
@@ -69,6 +75,20 @@ class FakeDesignStore implements DesignStore {
     if (!row) throw new Error(`FakeDesignStore.update: no row ${id}`);
     Object.assign(row, data);
     return { ...row };
+  }
+
+  async createSiblingAndSupersede(sourceId: string, data: Prisma.DesignUncheckedCreateInput) {
+    const src = this.rows.get(sourceId);
+    if (!src || src.validationStatus !== "regenerating") return null;
+    src.validationStatus = "superseded";
+    return this.create(data);
+  }
+
+  async findStuck(cutoff: Date, limit: number) {
+    return [...this.rows.values()]
+      .filter((r) => ["pending", "validating", "regenerating"].includes(r.validationStatus) && r.updatedAt < cutoff)
+      .slice(0, limit)
+      .map((r) => ({ ...r }));
   }
 
   async create(data: Prisma.DesignUncheckedCreateInput) {
@@ -157,6 +177,255 @@ async function fakeApplyFix(): Promise<void> {
 
 function fakeRenderFn(design: Design): Promise<Design> {
   return Promise.resolve({ ...design, status: "generated" });
+}
+
+async function issue33Cases() {
+  const {
+    runJudgeStep,
+    runJudgeAndRoute,
+    runFixStep,
+    runRegenerateStep,
+    abandonFixStep,
+    abandonJudgeStep,
+    abandonRegenerateStep,
+  } = await import("../src/lib/validation-chain");
+  const { sweepStuckValidations, SWEEPER_RETRY_MARKER } = await import("../src/lib/validation-sweeper");
+  const { isFinalDelivery } = await import("../src/lib/task-retry");
+
+  const regenVerdict = verdict({ usable: false, colorMatchesArt: false, fix: "regenerate" });
+  const relabelVerdict = verdict({ usable: false, colorMatchesArt: false, fix: "relabel" });
+  const noopEnqueue = async () => true;
+
+  console.log("\n=== #33 (a1): verdict.fix=regenerate with the regen budget spent is REJECTED, never sent to the fix queue ===");
+  {
+    // The prod stranding: sibling rows carry regen=1, judge said "regenerate",
+    // the old fallback routed to fix-design, which can only throw.
+    const store = new FakeDesignStore();
+    store.seed("s1", { validationStatus: "pending", validationFixAttempts: 1, validationRegenAttempts: 1 });
+    const judge = scriptedJudge([regenVerdict]);
+    const action = await runJudgeStep("s1", { store, judgeFn: judge.fn, loadImage: fakeLoadImage });
+    check('routes to "rejected"', action.type === "rejected", JSON.stringify(action));
+    check('row is terminal "rejected"', store.rows.get("s1")?.validationStatus === "rejected");
+  }
+
+  console.log("\n=== #33 (a2): fix step given a non-programmatic verdict ends the row and does not throw/retry ===");
+  {
+    const store = new FakeDesignStore();
+    store.seed("s2", { validationStatus: "regenerating" });
+    const res = await runFixStep("s2", regenVerdict, {
+      store,
+      applyFix: async () => {
+        throw new Error("would never be reached");
+      },
+    });
+    check("ok+skipped (no 5xx retry loop)", res.ok === true && res.skipped === true, JSON.stringify(res));
+    check('row terminal "rejected"', store.rows.get("s2")?.validationStatus === "rejected");
+  }
+
+  console.log("\n=== #33 (a3): a throwing fix stays retryable and resumable; final-attempt abandon ends it terminally ===");
+  {
+    const store = new FakeDesignStore();
+    store.seed("s3", { validationStatus: "regenerating", validationFixAttempts: 1 });
+    const failing = async () => {
+      throw new Error("sharp OOM");
+    };
+    const r1 = await runFixStep("s3", relabelVerdict, { store, applyFix: failing });
+    check("throwing fix -> ok:false (route answers 5xx)", r1.ok === false && r1.error === "sharp OOM");
+    check('row still "regenerating" and retryable', store.rows.get("s3")?.validationStatus === "regenerating");
+    const r2 = await runFixStep("s3", relabelVerdict, { store, applyFix: fakeApplyFix });
+    check("a redelivered fix resumes the mid-flight row (not a no-op)", r2.ok === true && !r2.skipped);
+    check('successful fix hands the row back to "pending" (judge-claimable)', store.rows.get("s3")?.validationStatus === "pending");
+    store.seed("s3b", { validationStatus: "regenerating" });
+    await abandonFixStep("s3b", "sharp OOM", store);
+    check(
+      'final-attempt abandon -> terminal "rejected" with a reason',
+      store.rows.get("s3b")?.validationStatus === "rejected" && /sharp OOM/.test(store.rows.get("s3b")?.validationNotes ?? "")
+    );
+    const lateAbandon = await abandonFixStep("s3", "late", store);
+    check("abandon never clobbers a row another task already moved on", lateAbandon === false && store.rows.get("s3")?.validationStatus === "pending");
+  }
+
+  console.log("\n=== #33 (a4): duplicate/late fix task is a no-op; judge on a fix/regenerate-owned row is a no-op ===");
+  {
+    const store = new FakeDesignStore();
+    store.seed("s4", { validationStatus: "regenerating" });
+    let applied = 0;
+    const applyFix = async () => {
+      applied++;
+    };
+    await runFixStep("s4", relabelVerdict, { store, applyFix });
+    const replay = await runFixStep("s4", relabelVerdict, { store, applyFix });
+    check("replayed fix skipped, applyFix ran once", replay.skipped === true && applied === 1, `applied=${applied}`);
+    store.seed("s4b", { validationStatus: "regenerating" });
+    const judge = scriptedJudge([verdict({})]);
+    const j = await runJudgeStep("s4b", { store, judgeFn: judge.fn, loadImage: fakeLoadImage });
+    check('duplicate judge task on a "regenerating" row is a no-op', j.type === "skipped" && judge.callCount() === 0, JSON.stringify(j));
+  }
+
+  console.log("\n=== #33 (a5): judge->fix enqueue failure rolls the row back so the retry re-routes (no double count, no strand) ===");
+  {
+    const store = new FakeDesignStore();
+    store.seed("s5", { validationStatus: "pending" });
+    const judge = scriptedJudge([relabelVerdict, relabelVerdict]);
+    let fixEnqueues = 0;
+    let failOnce = true;
+    const deps = {
+      store,
+      judgeFn: judge.fn,
+      loadImage: fakeLoadImage,
+      enqueueFix: async () => {
+        if (failOnce) {
+          failOnce = false;
+          throw new Error("cloud tasks 503");
+        }
+        fixEnqueues++;
+        return true;
+      },
+      enqueueRegenerate: noopEnqueue,
+    };
+    let threw = false;
+    try {
+      await runJudgeAndRoute("s5", deps);
+    } catch {
+      threw = true;
+    }
+    const mid = store.rows.get("s5");
+    check("enqueue failure surfaces (route answers 5xx)", threw);
+    check(
+      'row rolled back to "validating" with the attempt un-consumed',
+      mid?.validationStatus === "validating" && mid.validationFixAttempts === 0,
+      JSON.stringify(mid && { s: mid.validationStatus, f: mid.validationFixAttempts })
+    );
+    const again = await runJudgeAndRoute("s5", deps);
+    const end = store.rows.get("s5");
+    check("retry re-routes to fix", again.type === "enqueue-fix" && fixEnqueues === 1);
+    check('retry leaves "regenerating" with exactly 1 attempt', end?.validationStatus === "regenerating" && end.validationFixAttempts === 1);
+
+    store.seed("s5b", { validationStatus: "validating" });
+    await abandonJudgeStep("s5b", "gemini 500", store);
+    check('judge final-attempt abandon -> terminal "unjudged"', store.rows.get("s5b")?.validationStatus === "unjudged");
+
+    store.seed("s5c", { validationStatus: "pending" });
+    const j2 = scriptedJudge([regenVerdict]);
+    const noQ = await runJudgeAndRoute("s5c", { ...deps, judgeFn: j2.fn, enqueueRegenerate: async () => false });
+    check('unconfigured queue -> row ends "unjudged", not stranded', noQ.type === "skipped" && store.rows.get("s5c")?.validationStatus === "unjudged", JSON.stringify(noQ));
+  }
+
+  console.log("\n=== #33 (a6): regenerate render throws -> retry resumes the same sibling; final abandon ends the lineage ===");
+  {
+    const store = new FakeDesignStore();
+    store.seed("r1", { validationStatus: "regenerating" });
+    let calls = 0;
+    const flaky = async (sib: Design): Promise<Design> => {
+      calls++;
+      if (calls === 1) throw new Error("gemini 429 / rate limit");
+      return store.update(sib.id, { status: "generated" });
+    };
+    const first = await runRegenerateStep("r1", regenVerdict, { store, renderFn: flaky });
+    check("first attempt fails (route answers 5xx)", first.ok === false && Boolean(first.siblingId));
+    const retry = await runRegenerateStep("r1", regenVerdict, { store, renderFn: flaky });
+    check("retry resumes the SAME sibling and finishes", retry.ok === true && retry.siblingId === first.siblingId && Boolean(retry.judgeTargetId));
+    check("still exactly one sibling row", store.rows.size === 2);
+
+    store.seed("r2", { validationStatus: "regenerating" });
+    const bad = await runRegenerateStep("r2", regenVerdict, {
+      store,
+      renderFn: async () => {
+        throw new Error("permanent");
+      },
+    });
+    await abandonRegenerateStep("r2", "permanent", store);
+    const sib = store.rows.get(bad.siblingId!);
+    check('final abandon: sibling ends "rejected" + status "failed"', sib?.validationStatus === "rejected" && sib.status === "failed");
+    check('source stays "superseded" (terminal)', store.rows.get("r2")?.validationStatus === "superseded");
+  }
+
+  console.log("\n=== #33 (b): sibling creation atomically supersedes the original; late/duplicate tasks are no-ops ===");
+  {
+    const store = new FakeDesignStore();
+    store.seed("o1", { validationStatus: "regenerating" });
+    const made = await runRegenerateStep("o1", regenVerdict, { store, renderFn: async (s) => s });
+    check("sibling created", made.ok === true && Boolean(made.siblingId));
+    check('original flipped to "superseded"', store.rows.get("o1")?.validationStatus === "superseded");
+
+    const rows = store.rows.size;
+    const judge = scriptedJudge([verdict({})]);
+    const lateJudge = await runJudgeStep("o1", { store, judgeFn: judge.fn, loadImage: fakeLoadImage });
+    check("late judge task for the original is skipped, judge not called", lateJudge.type === "skipped" && judge.callCount() === 0);
+    let fixCalls = 0;
+    const lateFix = await runFixStep("o1", relabelVerdict, { store, applyFix: async () => void fixCalls++ });
+    check("late fix task for the original is skipped", lateFix.skipped === true && fixCalls === 0);
+    check('original still "superseded" after the late tasks', store.rows.get("o1")?.validationStatus === "superseded");
+
+    store.seed("o2", { validationStatus: "superseded" });
+    const dup = await runRegenerateStep("o2", regenVerdict, { store, renderFn: async (s) => s });
+    check("duplicate regenerate for a non-regenerating original creates nothing", dup.skipped === true && store.rows.size === rows + 1);
+
+    store.seed("o3", { validationStatus: "regenerating" });
+    const [c1, c2] = await Promise.all([
+      runRegenerateStep("o3", regenVerdict, { store, renderFn: async (s) => s }),
+      runRegenerateStep("o3", regenVerdict, { store, renderFn: async (s) => s }),
+    ]);
+    const sibs = [...store.rows.values()].filter((r) => r.regeneratedFromDesignId === "o3");
+    check("concurrent duplicate regenerates yield exactly one sibling", sibs.length === 1 && [c1, c2].some((c) => c.skipped), `siblings=${sibs.length}`);
+  }
+
+  console.log("\n=== #33 (c): stuck-row sweeper ===");
+  {
+    const store = new FakeDesignStore();
+    const now = new Date("2026-09-20T12:00:00Z");
+    const old = new Date(now.getTime() - 45 * 60_000);
+    const fresh = new Date(now.getTime() - 5 * 60_000);
+    store.seed("w-old-regen", { validationStatus: "regenerating", updatedAt: old });
+    store.seed("w-old-pending", { validationStatus: "pending", updatedAt: old });
+    store.seed("w-old-validating", { validationStatus: "validating", updatedAt: old });
+    store.seed("w-fresh", { validationStatus: "regenerating", updatedAt: fresh });
+    store.seed("w-done", { validationStatus: "validated", updatedAt: old });
+    store.seed("w-noart", { validationStatus: "pending", status: "generating", updatedAt: old });
+    store.seed("w-retried", {
+      validationStatus: "regenerating",
+      updatedAt: old,
+      validationNotes: `${SWEEPER_RETRY_MARKER} re-judging`,
+    });
+    const enqueued: string[] = [];
+    const res = await sweepStuckValidations({
+      store,
+      now,
+      enqueueJudge: async (id) => {
+        enqueued.push(id);
+        return true;
+      },
+    });
+    const st = (id: string) => store.rows.get(id)?.validationStatus;
+    check(
+      "stale in-flight rows retried once: re-queued at pending + judge enqueued",
+      ["w-old-regen", "w-old-pending", "w-old-validating"].every((id) => st(id) === "pending" && enqueued.includes(id)),
+      JSON.stringify(res)
+    );
+    check("retry marker stamped into validationNotes", (store.rows.get("w-old-regen")?.validationNotes ?? "").startsWith(SWEEPER_RETRY_MARKER));
+    check("fresh in-flight row left alone", st("w-fresh") === "regenerating" && !enqueued.includes("w-fresh"));
+    check("terminal row left alone", st("w-done") === "validated");
+    check('never-rendered row -> "rejected" with reason', st("w-noart") === "rejected" && /never rendered/.test(store.rows.get("w-noart")?.validationNotes ?? ""));
+    check('row already retried once -> "rejected" with reason', st("w-retried") === "rejected" && /after one sweeper retry/.test(store.rows.get("w-retried")?.validationNotes ?? ""));
+
+    // The retry itself stalled: the marker (kept until the judge rewrites notes) makes the next sweep terminal.
+    const later = new Date(now.getTime() + 60 * 60_000);
+    await sweepStuckValidations({ store, now: later, enqueueJudge: noopEnqueue });
+    check('a retried row that stalls again ends "rejected"', st("w-old-regen") === "rejected");
+
+    const store2 = new FakeDesignStore();
+    store2.seed("w-noq", { validationStatus: "regenerating", updatedAt: old });
+    await sweepStuckValidations({ store: store2, now, enqueueJudge: async () => false });
+    check('un-enqueueable judge -> "rejected"', store2.rows.get("w-noq")?.validationStatus === "rejected");
+  }
+
+  console.log("\n=== #33: final-delivery detection ===");
+  {
+    const mk = (n?: string) => new Request("http://x", { headers: n == null ? {} : { "x-cloudtasks-taskretrycount": n } });
+    check("no header -> not final", isFinalDelivery(mk(), 4) === false);
+    check("retry count 2 of 4 -> not final", isFinalDelivery(mk("2"), 4) === false);
+    check("retry count 3 of 4 -> final", isFinalDelivery(mk("3"), 4) === true);
+  }
 }
 
 async function main() {
@@ -326,6 +595,8 @@ async function main() {
     );
     check("no extra sibling row was created by the replay", store3.rows.size === siblingsCreatedBeforeReplay, `rows=${store3.rows.size}`);
   }
+
+  await issue33Cases();
 
   console.log(`\n${failures === 0 ? "ALL PASSED" : `${failures} FAILURE(S)`}`);
   if (failures > 0) process.exitCode = 1;

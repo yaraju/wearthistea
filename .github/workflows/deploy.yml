@@ -194,6 +194,12 @@ jobs:
 
           echo "variant_map=$(echo "$VARIANT_MAP" | clean_var)" >> $GITHUB_OUTPUT
 
+          # Direct Cloud Run URL for Cloud Tasks dispatch (issue #33) — bypasses
+          # Firebase Hosting's ~60s proxy cutoff, which 504'd long renders and
+          # made Cloud Tasks redeliver them. Empty on the very first deploy
+          # (service doesn't exist yet) -> tasks fall back to SITE_URL.
+          echo "run_url=$(gcloud run services describe "${{ env.SERVICE_NAME }}" --region="${{ env.REGION }}" --project="${{ env.PROJECT_ID }}" --format='value(status.url)' 2>/dev/null || true)" >> $GITHUB_OUTPUT
+
       - name: Build and Push Container
         run: |-
           docker build \
@@ -250,6 +256,7 @@ jobs:
             GCP_PROJECT_ID=${{ env.PROJECT_ID }}
             GCP_REGION=${{ env.REGION }}
             SITE_URL=${{ secrets.SITE_URL }}
+            TASKS_TARGET_URL=${{ steps.prep.outputs.run_url }}
             TASKS_SHARED_SECRET=${{ secrets.TASKS_SHARED_SECRET }}
             SELLER_BUSINESS_NAME=${{ secrets.SELLER_BUSINESS_NAME }}
             SELLER_GSTIN=${{ secrets.SELLER_GSTIN }}
@@ -262,6 +269,33 @@ jobs:
           # Firebase Google-sign-in gate (src/lib/auth.ts). To turn Basic
           # Auth back on later, add BASIC_AUTH_USER/BASIC_AUTH_PASSWORD back
           # to this list, sourced from repo secrets of the same name.
+
+      # Stuck-row watchdog (issue #33): every 10 minutes Cloud Scheduler POSTs
+      # /api/tasks/sweep-stuck-validation (same X-Task-Secret auth as the
+      # Cloud Tasks handlers), which retries once / rejects designs stranded
+      # in validationStatus pending|validating|regenerating. Idempotent
+      # create-or-update. Warns instead of failing the deploy if the deploy
+      # service account lacks roles/cloudscheduler.admin (see GCP_SETUP.md).
+      - name: Ensure stuck-row sweeper schedule
+        shell: bash
+        env:
+          SITE_URL: ${{ secrets.SITE_URL }}
+          TASKS_SHARED_SECRET: ${{ secrets.TASKS_SHARED_SECRET }}
+        run: |
+          JOB=sweep-stuck-validation
+          URL="${SITE_URL%/}/api/tasks/sweep-stuck-validation"
+          COMMON=(--project="${{ env.PROJECT_ID }}" --location="${{ env.REGION }}" \
+            --schedule="*/10 * * * *" --time-zone="Etc/UTC" \
+            --uri="$URL" --http-method=POST \
+            --attempt-deadline=60s)
+          (
+            gcloud services enable cloudscheduler.googleapis.com --project="${{ env.PROJECT_ID }}" &&
+            if gcloud scheduler jobs describe "$JOB" --project="${{ env.PROJECT_ID }}" --location="${{ env.REGION }}" >/dev/null 2>&1; then
+              gcloud scheduler jobs update http "$JOB" "${COMMON[@]}" --update-headers="X-Task-Secret=$TASKS_SHARED_SECRET,Content-Type=application/json"
+            else
+              gcloud scheduler jobs create http "$JOB" "${COMMON[@]}" --headers="X-Task-Secret=$TASKS_SHARED_SECRET,Content-Type=application/json"
+            fi
+          ) || echo "::warning::Could not create/update the '$JOB' Cloud Scheduler job — see GCP_SETUP.md (stuck-row sweeper)."
 
       - name: Deploy to Firebase Hosting
         run: |

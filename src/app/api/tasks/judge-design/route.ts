@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { runJudgeStep } from "@/lib/validation-chain";
+import { runJudgeAndRoute, abandonJudgeStep } from "@/lib/validation-chain";
+import { isFinalDelivery, QUEUE_MAX_ATTEMPTS } from "@/lib/task-retry";
 import { enqueueDesignFix, enqueueDesignRegenerate } from "@/lib/tasks";
 import { logger } from "@/lib/logger";
 
@@ -34,18 +35,25 @@ export async function POST(req: Request) {
   const { designId } = body;
 
   try {
-    const action = await runJudgeStep(designId);
-
-    if (action.type === "enqueue-fix") {
-      await enqueueDesignFix(designId, action.verdict);
-    } else if (action.type === "enqueue-regenerate") {
-      await enqueueDesignRegenerate(designId, action.verdict);
-    }
+    // Judge + dispatch to the next queue; a failed enqueue rolls the row back
+    // to "validating" and rethrows so the retry below re-routes it cleanly.
+    const action = await runJudgeAndRoute(designId, {
+      enqueueFix: enqueueDesignFix,
+      enqueueRegenerate: enqueueDesignRegenerate,
+    });
 
     return NextResponse.json({ ok: true, action: action.type });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Judge task failed.";
     logger.error(`[judge-design task] Failed for design ${designId}: ${message}`, { designId, error: err });
+    if (isFinalDelivery(req, QUEUE_MAX_ATTEMPTS.judge)) {
+      // Last delivery: end the row (issue #33) instead of stranding it at
+      // "validating" — 200 so Cloud Tasks stops.
+      await abandonJudgeStep(designId, message).catch((e) =>
+        logger.error("[judge-design task] Failed to abandon row on final attempt", { designId, error: e })
+      );
+      return NextResponse.json({ ok: false, error: message, final: true }, { status: 200 });
+    }
     // 5xx so Cloud Tasks retries per the judge queue's own backoff config —
     // a transient Gemini error shouldn't strand the design at "validating"
     // forever with nothing to redrive it (runJudgeStep's claim() allows a

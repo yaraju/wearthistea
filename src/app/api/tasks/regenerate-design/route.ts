@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { runRegenerateStep, judgeVerdictSchema } from "@/lib/validation-chain";
+import { runRegenerateStep, abandonRegenerateStep, judgeVerdictSchema } from "@/lib/validation-chain";
 import { enqueueDesignJudge } from "@/lib/tasks";
+import { isFinalDelivery, QUEUE_MAX_ATTEMPTS } from "@/lib/task-retry";
 import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -26,6 +27,16 @@ const Body = z.object({
 // stays a deliberate passthrough, while buildRegenerationEdit() turns the
 // judge's regenerationPrompt into the edit instruction actually applied via
 // gemini.ts's renderConceptArtFix().
+async function failOrRetry(req: Request, designId: string, error: string, siblingId?: string) {
+  if (isFinalDelivery(req, QUEUE_MAX_ATTEMPTS.regenerate)) {
+    await abandonRegenerateStep(designId, error).catch((e) =>
+      logger.error("[regenerate-design task] Failed to abandon lineage on final attempt", { designId, error: e })
+    );
+    return NextResponse.json({ ok: false, error, siblingId, final: true }, { status: 200 });
+  }
+  return NextResponse.json({ ok: false, error, siblingId }, { status: 502 });
+}
+
 export async function POST(req: Request) {
   const secret = req.headers.get("x-task-secret");
   if (!process.env.TASKS_SHARED_SECRET || secret !== process.env.TASKS_SHARED_SECRET) {
@@ -52,18 +63,32 @@ export async function POST(req: Request) {
       // 5xx so Cloud Tasks retries — runRegenerateStep() is idempotent
       // against a retry (it reuses the already-created sibling via
       // findByRegeneratedFrom rather than erroring on the @unique
-      // constraint or duplicating it).
-      return NextResponse.json({ ok: false, error: result.error, siblingId: result.siblingId }, { status: 502 });
+      // constraint or duplicating it). On the FINAL delivery (issue #33) end
+      // the lineage terminally instead of leaving the sibling "pending".
+      return failOrRetry(req, designId, result.error ?? "Sibling render failed.", result.siblingId);
     }
 
     if (result.judgeTargetId) {
-      await enqueueDesignJudge(result.judgeTargetId).catch((err) => {
+      let queued = false;
+      try {
+        queued = await enqueueDesignJudge(result.judgeTargetId);
+      } catch (err) {
         logger.error("[regenerate-design task] Failed to enqueue judge task for sibling", {
           designId,
           siblingId: result.judgeTargetId,
           error: err,
         });
-      });
+      }
+      // Issue #33: this used to be swallowed as a 200, orphaning the sibling
+      // at "pending". A redelivery re-finds the sibling (idempotent) and
+      // re-enqueues; if the final delivery still cannot, the stuck-row
+      // sweeper (src/lib/validation-sweeper.ts) re-judges it.
+      if (!queued && !isFinalDelivery(req, QUEUE_MAX_ATTEMPTS.regenerate)) {
+        return NextResponse.json(
+          { ok: false, error: "Failed to enqueue judge.", siblingId: result.siblingId },
+          { status: 502 }
+        );
+      }
     }
 
     return NextResponse.json({ ok: true, skipped: Boolean(result.skipped), siblingId: result.siblingId });
@@ -73,6 +98,6 @@ export async function POST(req: Request) {
       designId,
       error: err,
     });
-    return NextResponse.json({ ok: false, error: message }, { status: 502 });
+    return failOrRetry(req, designId, message);
   }
 }
