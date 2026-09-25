@@ -66,23 +66,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       backLayout: body.backLayout,
       backDesignImagePath: saved.path,
       backDesignPreviewImagePath: saved.previewPath,
-      // Art changed — force a re-upload next time PrintRove needs it.
-      printroveBackDesignId: null,
-    },
-  });
-
-  // Force every (category, color) product for this design to rebuild
-  // against the new back art — ensureDesignProduct() recreates on next
-  // poll/view once these are cleared.
-  await prisma.designProduct.updateMany({
-    where: { designId: id },
-    data: {
-      printroveProductId: null,
-      printroveVariantId: null,
-      mockupFrontUrl: null,
-      mockupBackUrl: null,
-      status: "pending",
-      errorMessage: null,
+      // New back path = new art version: ensureDesignProduct() rebuilds the
+      // stale products and re-uploads on next poll/view (art-version.ts).
     },
   });
 

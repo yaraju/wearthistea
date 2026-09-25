@@ -156,10 +156,6 @@ export async function realizeDesign(designId: string, parent?: any) {
         productPreviewImagePath,
         backDesignImagePath,
         backDesignPreviewImagePath,
-        // Ink color may have just changed (new garment color) — clear the
-        // stale PrintRove upload id so the next touch re-uploads the new art
-        // instead of reusing the old color's asset.
-        ...(design.backPhrase ? { printroveBackDesignId: null } : {}),
         // See the identical comment in /api/generate/retry — only needed as
         // a lost-file fallback when GCS isn't configured.
         designImageData: hasDurableStorage ? null : finalDesignB64,
