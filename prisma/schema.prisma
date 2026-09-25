@@ -130,6 +130,11 @@ model Design {
   // (color re-render, admin layout flip) so the next PrintRove touch
   // re-uploads instead of reusing stale art.
   printroveBackDesignId String?
+  // Which art each upload above was made from (designImagePath /
+  // backDesignImagePath at upload time) — an upload is only reusable while
+  // that still matches the current path. See src/lib/art-version.ts.
+  printroveDesignArtPath     String?
+  printroveBackDesignArtPath String?
 
   // Shareable identity: slugify(title) + "-" + id, set once the design row
   // has an id (see /api/generate and scripts/backfill-designs.ts). Nullable
@@ -210,6 +215,10 @@ model DesignProduct {
   printroveVariantId String?
   mockupFrontUrl     String?
   mockupBackUrl      String?
+  // artVersion() of the design's art this row was built from; a mismatch
+  // with the design's current art means the row is stale and gets rebuilt
+  // (src/lib/art-version.ts). Null on rows that predate the column.
+  builtFromArtVersion String?
   // pending | ready | failed — Printrove product-creation/mockup lifecycle.
   status       String  @default("pending")
   errorMessage String? @db.Text

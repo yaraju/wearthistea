@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { printroveProduct } from "@/config/settings";
 import { uploadDesign, createProduct, getProduct, trimDesign } from "@/lib/printrove";
+import { artVersion, isDesignProductStale, isUploadReusable, DESIGN_PRODUCT_RESET } from "@/lib/art-version";
 import type { BackLayout } from "@/lib/back-design";
 import { readImageAsBase64 } from "@/lib/storage";
 import { logger } from "@/lib/logger";
@@ -42,13 +43,23 @@ export async function ensureDesignProduct(
     where: { designId_category_color: { designId, category, color } },
   });
 
-  if (existing?.mockupFrontUrl) return existing;
-
-  if (existing?.printroveProductId) {
-    return await refreshMockup(existing);
+  // Lookup is keyed by the CURRENT variantColor, so an old-colour row left
+  // behind by a colour change is never picked — it just sits orphaned (kept,
+  // since Orders may reference it).
+  let row = existing;
+  if (row && isDesignProductStale(row, artVersion(design))) {
+    // Built from art that has since changed — drop the old Printrove product
+    // and mockups so nothing from the old art is served or reused.
+    row = await prisma.designProduct.update({ where: { id: row.id }, data: DESIGN_PRODUCT_RESET });
   }
 
-  return await createDesignProduct(design, category, color, existing);
+  if (row?.mockupFrontUrl) return row;
+
+  if (row?.printroveProductId) {
+    return await refreshMockup(row);
+  }
+
+  return await createDesignProduct(design, category, color, row);
 }
 
 async function refreshMockup(row: DesignProduct): Promise<DesignProduct> {
@@ -76,6 +87,7 @@ async function createDesignProduct(
   existingFailedRow: DesignProduct | null
 ): Promise<DesignProduct> {
   const designId = design.id;
+  const version = artVersion(design);
   const product = printroveProduct(category);
   if (!product.enabled || product.category !== category) {
     return upsertFailed(designId, category, color, product.previewSize, `"${category}" isn't an enabled category.`);
@@ -112,15 +124,16 @@ async function createDesignProduct(
     // Upload the artwork once and persist it on Design — every other
     // category/color combo for this design reuses the same asset (the
     // uploaded PNG itself doesn't encode garment color — only which base
-    // variant id it gets placed onto at product-creation time does).
+    // variant id it gets placed onto at product-creation time does). Reused
+    // only if it was uploaded from this exact art (printroveDesignArtPath).
     let printroveDesignId: number;
-    if (design.printroveDesignId) {
+    if (isUploadReusable(design.printroveDesignId, design.printroveDesignArtPath, design.designImagePath)) {
       printroveDesignId = Number(design.printroveDesignId);
     } else {
       printroveDesignId = await uploadDesign(`${design.id}.png`, trimmed.base64);
       await prisma.design.update({
         where: { id: design.id },
-        data: { printroveDesignId: String(printroveDesignId) },
+        data: { printroveDesignId: String(printroveDesignId), printroveDesignArtPath: design.designImagePath },
       });
     }
 
@@ -136,13 +149,18 @@ async function createDesignProduct(
         const trimmedBack = await trimDesign(backBase64);
 
         let printroveBackDesignId: number;
-        if (design.printroveBackDesignId) {
+        if (
+          isUploadReusable(design.printroveBackDesignId, design.printroveBackDesignArtPath, design.backDesignImagePath)
+        ) {
           printroveBackDesignId = Number(design.printroveBackDesignId);
         } else {
           printroveBackDesignId = await uploadDesign(`${design.id}-back.png`, trimmedBack.base64);
           await prisma.design.update({
             where: { id: design.id },
-            data: { printroveBackDesignId: String(printroveBackDesignId) },
+            data: {
+              printroveBackDesignId: String(printroveBackDesignId),
+              printroveBackDesignArtPath: design.backDesignImagePath,
+            },
           });
         }
 
@@ -168,6 +186,27 @@ async function createDesignProduct(
       back,
     });
 
+    // Compare-and-set: if a re-render/fix/flip landed while we were
+    // uploading, this product shows old art — don't persist it, leave the row
+    // pending so the next ensureDesignProduct() rebuilds it. (The stamp below
+    // is the art version we actually built from, so any race that slips past
+    // this check is still caught as stale on the next call.)
+    const latest = await prisma.design.findUnique({
+      where: { id: designId },
+      select: { designImagePath: true, backDesignImagePath: true },
+    });
+    if (!latest || artVersion(latest) !== version) {
+      logger.warn("[design-products] Art changed during product build, discarding", { designId, category });
+      return (
+        existingFailedRow ??
+        (await prisma.designProduct.upsert({
+          where: { designId_category_color: { designId, category, color } },
+          create: { designId, category, color, previewSize: product.previewSize, status: "pending" },
+          update: {},
+        }))
+      );
+    }
+
     // Upsert, not create: a concurrent brew-task run and an on-demand
     // customer fetch can race on the same (designId, category, color) —
     // the unique constraint makes this safe either way.
@@ -180,9 +219,11 @@ async function createDesignProduct(
         previewSize: product.previewSize,
         printroveProductId: String(created.productId),
         printroveVariantId: created.variantId != null ? String(created.variantId) : null,
+        builtFromArtVersion: version,
         status: "pending",
       },
       update: {
+        builtFromArtVersion: version,
         printroveProductId: String(created.productId),
         printroveVariantId: created.variantId != null ? String(created.variantId) : null,
         status: "pending",
