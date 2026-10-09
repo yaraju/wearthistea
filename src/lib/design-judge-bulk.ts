@@ -24,7 +24,7 @@
 import type { Design } from "@prisma/client";
 import { ai } from "./gemini";
 import { existsInGcs, hasDurableStorage, assertDesignPathFieldsShape } from "./storage";
-import { prompts } from "@/config/prompts";
+import { prompts, BRAND_VOICE, CONCEPT_RULES, ART_RULES } from "@/config/prompts";
 import { settings } from "@/config/settings";
 import type { JudgeVerdict } from "./design-judge";
 
@@ -165,7 +165,7 @@ export interface StyleVerdict {
  * judgeDesign() has none: a check that silently "passes" everything when
  * GEMINI_API_KEY is unset would be a false-validate a bulk runner could
  * write to every row. */
-async function defaultStyleReview(design: StyleCheckableDesign): Promise<StyleVerdict> {
+async function geminiStyleReview(design: StyleCheckableDesign): Promise<StyleVerdict> {
   const res = await ai().models.generateContent({
     model: settings.gemini.textModel,
     contents: [{ role: "user", parts: [{ text: prompts.styleAlignmentReview(design) }] }],
@@ -192,6 +192,29 @@ async function defaultStyleReview(design: StyleCheckableDesign): Promise<StyleVe
   const aligned = typeof parsed.aligned === "boolean" ? parsed.aligned : violations.length === 0;
 
   return { aligned, violations };
+}
+
+/**
+ * Default style review. With DECISION_STYLE_REVIEW=jev the text-only check
+ * goes to Jev (measured: same 100% accuracy on 36 labeled concepts, ~95%
+ * faster, ~98% cheaper per call); any Jev error falls back to Gemini so a
+ * Jev outage never blocks the bulk runner. Jev returns a single violation
+ * flag, so `violations` is generic; use "gemini" when the detail matters.
+ */
+async function defaultStyleReview(design: StyleCheckableDesign): Promise<StyleVerdict> {
+  if (settings.decision.styleReview === "jev" && process.env.TYPESAFE_API_KEY) {
+    const { jevStyleReview } = await import("./decision/jev");
+    const rules = [
+      BRAND_VOICE,
+      CONCEPT_RULES,
+      ART_RULES,
+      "NOTE: ART_RULES governs rendered pixels. Only flag visualConcept against ART_RULES if it explicitly INSTRUCTS drawing a prohibited element (logo, copyrighted character, meme screenshot, signature/watermark); merely describing a genre or aesthetic is fine. A missing backPhrase is not a violation.",
+    ].join("\n\n");
+    const r = await jevStyleReview(design, rules);
+    if (r.value) return { aligned: r.value.aligned, violations: r.value.violations };
+    console.warn(`[style-review] Jev failed (${r.error}); falling back to Gemini`);
+  }
+  return geminiStyleReview(design);
 }
 
 /**
