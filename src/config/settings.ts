@@ -30,6 +30,24 @@ export const settings = {
    */
   provider: (process.env.PRINT_PROVIDER ?? "printrove").toLowerCase(),
 
+  /**
+   * Jev (TypeSafe System One) decision steps. Each flag is "off" (default,
+   * no calls), "shadow" (call + log what WOULD happen, never changes
+   * behavior) or "enforce". All calls fail open on error/timeout.
+   */
+  decision: {
+    // Anything other than shadow|enforce (including "" from an unset CI var) is "off".
+    keywordGate: ((v) => (v === "shadow" || v === "enforce" ? v : "off"))(
+      (process.env.DECISION_GATE ?? "").trim().toLowerCase()
+    ) as "off" | "shadow" | "enforce",
+    /** Per-category probability at/above which the keyword gate blocks. */
+    gateThreshold: num(process.env.DECISION_GATE_THRESHOLD, 0.5),
+    /** Bulk style re-check provider: "gemini" (default) or "jev" (falls back to Gemini on error). */
+    styleReview: ((process.env.DECISION_STYLE_REVIEW ?? "").trim().toLowerCase() === "jev" ? "jev" : "gemini") as
+      | "gemini"
+      | "jev",
+  },
+
   gemini: {
     /** Near-instant text/SVG model for Stage 1. */
     flashLiteModel: process.env.GEMINI_FLASH_LITE_MODEL ?? "gemini-3.5-flash-lite",
@@ -45,6 +63,13 @@ export const settings = {
      * Verified: gemini-3.1-flash-image (Nano Banana 2) is the current stable fast choice.
      */
     imageModel: process.env.GEMINI_IMAGE_MODEL ?? "gemini-3.1-flash-image",
+    /**
+     * Backup image model, tried after the primary fails twice with a
+     * transient 429/503 (see gemini-resilient.ts). Empty = no fallback.
+     */
+    imageBackupModel: process.env.GEMINI_IMAGE_BACKUP_MODEL ?? "",
+    /** Backup text/judge model, same policy. Empty = no fallback. */
+    textBackupModel: process.env.GEMINI_TEXT_BACKUP_MODEL ?? "",
     /** Creativity for concept text. Higher = wilder. */
     textTemperature: num(process.env.GEMINI_TEXT_TEMPERATURE, 1.05),
   },

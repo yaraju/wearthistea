@@ -5,6 +5,7 @@ import { settings, printroveProduct } from "@/config/settings";
 import { enqueueEmail } from "@/lib/tasks";
 import { shippedEmail } from "@/lib/email";
 import { logger } from "@/lib/logger";
+import { isUploadReusable } from "@/lib/art-version";
 import type { Order } from "@prisma/client";
 
 export type PushOrderResult =
@@ -118,12 +119,20 @@ export async function pushOrderToProvider(orderId: string): Promise<PushOrderRes
         color: order.variantColor ?? "",
       },
       category: order.productCategory,
-      printroveDesignId: design.printroveDesignId,
+      printroveDesignId: isUploadReusable(design.printroveDesignId, design.printroveDesignArtPath, design.designImagePath)
+        ? design.printroveDesignId
+        : null,
       ...(backDesignBase64
         ? {
             backDesignBase64,
             backDesignFileName: `${design.id}-back.png`,
-            printroveBackDesignId: design.printroveBackDesignId,
+            printroveBackDesignId: isUploadReusable(
+              design.printroveBackDesignId,
+              design.printroveBackDesignArtPath,
+              design.backDesignImagePath
+            )
+              ? design.printroveBackDesignId
+              : null,
             backLayout: design.backLayout,
           }
         : {}),
@@ -148,16 +157,25 @@ export async function pushOrderToProvider(orderId: string): Promise<PushOrderRes
     // uploaded (e.g. a legacy order whose brew never ran the Printrove
     // task) — every later category/color/order for this design can then
     // reuse it instead of re-uploading.
-    if (result.printroveDesignId && !design.printroveDesignId) {
+    if (
+      result.printroveDesignId &&
+      !isUploadReusable(design.printroveDesignId, design.printroveDesignArtPath, design.designImagePath)
+    ) {
       await prisma.design.update({
         where: { id: design.id },
-        data: { printroveDesignId: result.printroveDesignId },
+        data: { printroveDesignId: result.printroveDesignId, printroveDesignArtPath: design.designImagePath },
       });
     }
-    if (result.printroveBackDesignId && !design.printroveBackDesignId) {
+    if (
+      result.printroveBackDesignId &&
+      !isUploadReusable(design.printroveBackDesignId, design.printroveBackDesignArtPath, design.backDesignImagePath)
+    ) {
       await prisma.design.update({
         where: { id: design.id },
-        data: { printroveBackDesignId: result.printroveBackDesignId },
+        data: {
+          printroveBackDesignId: result.printroveBackDesignId,
+          printroveBackDesignArtPath: design.backDesignImagePath,
+        },
       });
     }
 

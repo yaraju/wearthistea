@@ -29,13 +29,24 @@ import type { Design } from "@prisma/client";
 import { ai, measureInkLuminance } from "./gemini";
 import { prompts } from "@/config/prompts";
 import { settings } from "@/config/settings";
+import { withModelFallback } from "./gemini-resilient";
 
-export type JudgeFix = "none" | "relabel" | "invert-ink" | "rerun-bg-removal" | "regenerate";
+export type JudgeFix =
+  "none" | "relabel" | "invert-ink" | "rerun-bg-removal" | "regenerate";
 
-const FIX_VALUES: readonly JudgeFix[] = ["none", "relabel", "invert-ink", "rerun-bg-removal", "regenerate"];
+const FIX_VALUES: readonly JudgeFix[] = [
+  "none",
+  "relabel",
+  "invert-ink",
+  "rerun-bg-removal",
+  "regenerate",
+];
 
 function isJudgeFix(value: unknown): value is JudgeFix {
-  return typeof value === "string" && (FIX_VALUES as readonly string[]).includes(value);
+  return (
+    typeof value === "string" &&
+    (FIX_VALUES as readonly string[]).includes(value)
+  );
 }
 
 export interface JudgeVerdict {
@@ -76,7 +87,10 @@ export interface JudgeVerdict {
  * "relabel" is a safe fix (see prompts.imageReview()'s doc comment) —
  * callers can pass a full Design row, or any object with at least these
  * three fields (e.g. a freshly-generated Concept before it's persisted). */
-export type JudgeableDesign = Pick<Design, "phrase" | "visualConcept" | "style">;
+export type JudgeableDesign = Pick<
+  Design,
+  "phrase" | "visualConcept" | "style"
+>;
 
 /**
  * Judge one rendered design's artwork. Calls Gemini for real (the same
@@ -89,7 +103,7 @@ export type JudgeableDesign = Pick<Design, "phrase" | "visualConcept" | "style">
 export async function judgeDesign(
   design: JudgeableDesign,
   imageB64: string,
-  claimedColor: "Black" | "White"
+  claimedColor: "Black" | "White",
 ): Promise<JudgeVerdict> {
   const measuredInkLuminance = await measureInkLuminance(imageB64);
 
@@ -104,29 +118,47 @@ export async function judgeDesign(
       : (() => {
           const reads = measuredInkLuminance > 127.5 ? "light" : "dark";
           const wants = claimedColor === "Black" ? "light" : "dark";
-          const direction = reads === wants ? "MATCHES the claimed color's needed ink direction" : "MISMATCHES the claimed color's needed ink direction";
+          const direction =
+            reads === wants
+              ? "MATCHES the claimed color's needed ink direction"
+              : "MISMATCHES the claimed color's needed ink direction";
           return `measured ${measuredInkLuminance.toFixed(1)}/255 -> reads as ${reads} ink; claimed color is ${claimedColor}, which needs ${wants} ink; this ${direction}.`;
         })();
 
   const style: "raster" | "svg" = design.style === "svg" ? "svg" : "raster";
 
-  const res = await ai().models.generateContent({
-    model: settings.gemini.textModel,
-    contents: [
-      {
-        role: "user",
-        parts: [
-          { text: prompts.imageReview(design, claimedColor, luminanceHint, style) },
-          { inlineData: { mimeType: "image/png", data: imageB64 } },
+  const { value: res } = await withModelFallback(
+    settings.gemini.textModel,
+    (model) =>
+      ai().models.generateContent({
+        model,
+        contents: [
+          {
+            role: "user",
+            parts: [
+              {
+                text: prompts.imageReview(
+                  design,
+                  claimedColor,
+                  luminanceHint,
+                  style,
+                ),
+              },
+              { inlineData: { mimeType: "image/png", data: imageB64 } },
+            ],
+          },
         ],
-      },
-    ],
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: prompts.imageReviewSchema as unknown as Record<string, unknown>,
-      temperature: 0,
-    },
-  });
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: prompts.imageReviewSchema as unknown as Record<
+            string,
+            unknown
+          >,
+          temperature: 0,
+        },
+      }),
+    { backupModel: settings.gemini.textBackupModel, label: "judgeDesign" },
+  );
 
   const text = res.text;
   if (!text) throw new Error("Judge model returned no text.");
@@ -141,10 +173,18 @@ export async function judgeDesign(
   const issues = Array.isArray(parsed.issues)
     ? parsed.issues.filter((i): i is string => typeof i === "string")
     : [];
-  const usable = typeof parsed.usable === "boolean" ? parsed.usable : issues.length === 0;
-  const needsRegeneration = typeof parsed.needsRegeneration === "boolean" ? parsed.needsRegeneration : !usable;
-  const colorMatchesArt = typeof parsed.colorMatchesArt === "boolean" ? parsed.colorMatchesArt : true;
-  const regenerationPrompt = typeof parsed.regenerationPrompt === "string" ? parsed.regenerationPrompt : "";
+  const usable =
+    typeof parsed.usable === "boolean" ? parsed.usable : issues.length === 0;
+  const needsRegeneration =
+    typeof parsed.needsRegeneration === "boolean"
+      ? parsed.needsRegeneration
+      : !usable;
+  const colorMatchesArt =
+    typeof parsed.colorMatchesArt === "boolean" ? parsed.colorMatchesArt : true;
+  const regenerationPrompt =
+    typeof parsed.regenerationPrompt === "string"
+      ? parsed.regenerationPrompt
+      : "";
   const fix = isJudgeFix(parsed.fix)
     ? parsed.fix
     : needsRegeneration

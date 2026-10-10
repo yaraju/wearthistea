@@ -17,6 +17,7 @@ import { checkGenerateRateLimit } from "@/lib/rate-limit";
 import { enqueueDesignRender } from "@/lib/tasks";
 import { finalizeDesignRender } from "@/lib/design-render";
 import { assertDesignPathFieldsShape } from "@/lib/storage";
+import { screenKeyword } from "@/lib/decision/gate";
 
 /** Run `worker` over `items`, at most `concurrency` at a time — used for the
  * inline-render fallback below (no render queue configured), so a full
@@ -111,7 +112,35 @@ export async function POST(req: Request) {
     // it, resolved by renderConceptArt() once each design's render actually
     // runs (dispatched below) and written to Design.variantColor then —
     // never known at this row-creation point.
-    const concepts = await generateConcepts(keyword, count, { style, category, productType }, trace);
+    // Pre-render input gate (Jev). Runs concurrently with concept writing so
+    // it adds ~no latency; fail-open (see decision/gate.ts). "shadow" only
+    // logs what would have been blocked.
+    const gateMode = settings.decision.keywordGate;
+    const gatePromise =
+      gateMode === "off" ? null : screenKeyword(keyword, { threshold: settings.decision.gateThreshold });
+    const conceptsPromise = generateConcepts(keyword, count, { style, category, productType }, trace);
+    conceptsPromise.catch(() => {}); // avoid an unhandled rejection while the gate is awaited; awaited (and thrown) below
+    const gate = gatePromise ? await gatePromise : null;
+    if (gate) {
+      logger.info(`[Stage 1] keyword gate (${gateMode}): ${gate.blocked ? "WOULD BLOCK" : "pass"}`, {
+        traceId,
+        blocked: gate.blocked,
+        reasons: gate.reasons,
+        failedOpen: gate.failedOpen,
+        latencyMs: Math.round(gate.latencyMs),
+        costUsd: gate.costUsd,
+      });
+      trace.event({ name: "keyword-gate", input: { mode: gateMode }, output: gate });
+      if (gateMode === "enforce" && gate.blocked) {
+        conceptsPromise.catch(() => {}); // already in flight; discard
+        trace.update({ tags: ["gate-blocked"], output: { reasons: gate.reasons } });
+        return NextResponse.json(
+          { error: "That one's not something we can put on a shirt. Try a different bit of tea." },
+          { status: 422 }
+        );
+      }
+    }
+    const concepts = await conceptsPromise;
 
     const batchSpan = trace.span({ name: "create-batch-row" });
     const batch = await prisma.batch.create({ data: { keyword } }).catch((err) => {

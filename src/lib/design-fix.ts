@@ -48,7 +48,6 @@ import {
   BackgroundRemovalRegressionError,
 } from "./design-fixes";
 import { assertDesignPathFieldsShape, saveImageWithPreview, readImageAsBase64, hasDurableStorage } from "./storage";
-import { logger } from "./logger";
 
 export { InvertInkStyleError, BackgroundRemovalRegressionError };
 
@@ -66,54 +65,6 @@ async function loadFrontArtBase64(design: Pick<Design, "designImagePath" | "desi
     }
     return design.designImageData;
   }
-}
-
-/**
- * Invalidate whatever Printrove-side cache is now stale because this
- * design's stored artwork and/or variantColor changed underneath it —
- * mirrors /api/admin/designs/[id]/back-layout's own reset, the only other
- * place this app already mutates a design's art/color in place after
- * creation. Without this, a DesignProduct row's cached mockupFrontUrl
- * short-circuits ensureDesignProduct() (design-products.ts) forever, so a
- * customer/admin would keep seeing the pre-fix mockup even after the
- * underlying art/color was corrected. Best-effort/non-fatal — the fix
- * itself already succeeded by the time this runs, and a stale mockup that
- * eventually gets rebuilt on the next poll is a much smaller problem than
- * losing the fix.
- */
-async function invalidatePrintroveCache(designId: string, opts: { front?: boolean; back?: boolean }): Promise<void> {
-  const { prisma } = await import("./prisma");
-
-  const designPatch: Record<string, null> = {};
-  if (opts.front) designPatch.printroveDesignId = null;
-  if (opts.back) designPatch.printroveBackDesignId = null;
-  if (Object.keys(designPatch).length > 0) {
-    await prisma.design.update({ where: { id: designId }, data: designPatch }).catch((err) => {
-      logger.error("[applyProgrammaticFix] Failed to reset printrove*DesignId cache (non-fatal)", {
-        designId,
-        error: err,
-      });
-    });
-  }
-
-  await prisma.designProduct
-    .updateMany({
-      where: { designId },
-      data: {
-        printroveProductId: null,
-        printroveVariantId: null,
-        mockupFrontUrl: null,
-        mockupBackUrl: null,
-        status: "pending",
-        errorMessage: null,
-      },
-    })
-    .catch((err) => {
-      logger.error("[applyProgrammaticFix] Failed to invalidate stale DesignProduct rows (non-fatal)", {
-        designId,
-        error: err,
-      });
-    });
 }
 
 export async function applyProgrammaticFix(design: Design, verdict: JudgeVerdict): Promise<void> {
@@ -144,18 +95,9 @@ export async function applyProgrammaticFix(design: Design, verdict: JudgeVerdict
         data: { variantColor: result.variantColor, backDesignImagePath, backDesignPreviewImagePath },
       });
 
-      // Only the back art (if any) actually changed bytes; the front art's
-      // uploaded PNG doesn't encode garment color (design-products.ts's
-      // ensureDesignProduct doc comment), so printroveDesignId stays valid.
-      if (result.backDesignImageB64) {
-        await invalidatePrintroveCache(design.id, { back: true });
-      } else {
-        // No back print to invalidate, but the (designId, category, color)
-        // cache key ensureDesignProduct() looks up by IS now different —
-        // still clear any stale DesignProduct rows so a rebuild happens
-        // against the new color rather than serving old-color leftovers.
-        await invalidatePrintroveCache(design.id, {});
-      }
+      // No Printrove invalidation needed: ensureDesignProduct() looks rows up
+      // by the new variantColor and treats any row built from a different art
+      // version (e.g. the new back art) as stale — see art-version.ts.
       return;
     }
 
@@ -184,7 +126,6 @@ export async function applyProgrammaticFix(design: Design, verdict: JudgeVerdict
           designImageData: hasDurableStorage ? null : invertedB64,
         },
       });
-      await invalidatePrintroveCache(design.id, { front: true });
       return;
     }
 
@@ -210,7 +151,6 @@ export async function applyProgrammaticFix(design: Design, verdict: JudgeVerdict
           designImageData: hasDurableStorage ? null : cleanedB64,
         },
       });
-      await invalidatePrintroveCache(design.id, { front: true });
       return;
     }
 

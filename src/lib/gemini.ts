@@ -5,6 +5,7 @@ import { prompts, type Concept } from "@/config/prompts";
 import { removeBgB64 } from "./background-removal";
 import { compositePhraseBand, PRINT_CANVAS_WIDTH, PRINT_CANVAS_HEIGHT, PRINT_TEXT_BAND_HEIGHT } from "./text-layer";
 import { langfuse } from "./langfuse";
+import { withModelFallback } from "./gemini-resilient";
 
 let client: GoogleGenAI | null = null;
 
@@ -314,16 +315,21 @@ export async function generateImageEdit(
     // sole content there. TEXT is requested alongside IMAGE for the same
     // reason as generateImage(): a fresh COLOR_CHOICE self-report (see
     // prompts.designImageFix()'s doc comment).
-    const res = await ai().models.generateContent({
+    const { value: res, servedBy } = await withModelFallback(
       model,
-      contents: [
-        {
-          role: "user",
-          parts: [{ inlineData: { mimeType: "image/png", data: inputImageB64 } }, { text: prompt }],
-        },
-      ],
-      config: { responseModalities: ["TEXT", "IMAGE"] },
-    });
+      (m) =>
+        ai().models.generateContent({
+          model: m,
+          contents: [
+            {
+              role: "user",
+              parts: [{ inlineData: { mimeType: "image/png", data: inputImageB64 } }, { text: prompt }],
+            },
+          ],
+          config: { responseModalities: ["TEXT", "IMAGE"] },
+        }),
+      { backupModel: settings.gemini.imageBackupModel, label: "generateImageEdit" }
+    );
 
     const parts = res.candidates?.[0]?.content?.parts ?? [];
     let imageB64: string | undefined;
@@ -337,7 +343,7 @@ export async function generateImageEdit(
       throw new Error(`Image-edit model "${model}" returned no image data for the targeted regeneration.`);
     }
 
-    observation.end({ output: { image: "[image data]", text } });
+    observation.end({ output: { image: "[image data]", text }, metadata: { servedBy } });
     return { imageB64, text: text || undefined };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -615,11 +621,16 @@ export async function generateImage(prompt: string, modelOverride?: string, pare
     // TEXT is requested alongside IMAGE so the model can self-report which
     // garment color (black/white) it chose for the strongest ink contrast —
     // see GARMENT_COLOR_CHOICE in prompts.ts and resolveGarmentColor() above.
-    const res = await ai().models.generateContent({
+    const { value: res, servedBy } = await withModelFallback(
       model,
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      config: { responseModalities: ["TEXT", "IMAGE"] },
-    });
+      (m) =>
+        ai().models.generateContent({
+          model: m,
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          config: { responseModalities: ["TEXT", "IMAGE"] },
+        }),
+      { backupModel: settings.gemini.imageBackupModel, label: "generateImage" }
+    );
 
     const parts = res.candidates?.[0]?.content?.parts ?? [];
     let imageB64: string | undefined;
@@ -636,7 +647,7 @@ export async function generateImage(prompt: string, modelOverride?: string, pare
       );
     }
 
-    observation.end({ output: { image: "[image data]", text } });
+    observation.end({ output: { image: "[image data]", text }, metadata: { servedBy } });
     return { imageB64, text: text || undefined };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
