@@ -229,11 +229,14 @@ jobs:
             GCS_BUCKET=${{ secrets.GCS_BUCKET }}
             DATABASE_URL=${{ secrets.DATABASE_URL }}
             GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
-            GEMINI_IMAGEN_FAST_MODEL=gemini-nano-banana-2.1
-            GEMINI_IMAGE_MODEL=gemini-nano-banana-2.1
-            GEMINI_IMAGE_BACKUP_MODEL=gemini-3.1-flash-lite-image
+            GEMINI_IMAGEN_FAST_MODEL=${{ secrets.GEMINI_IMAGEN_FAST_MODEL }}
+            GEMINI_IMAGE_MODEL=${{ secrets.GEMINI_IMAGE_MODEL }}
+            GEMINI_IMAGE_BACKUP_MODEL=${{ secrets.GEMINI_IMAGE_BACKUP_MODEL }}
+            GEMINI_TEXT_BACKUP_MODEL=${{ secrets.GEMINI_TEXT_BACKUP_MODEL }}
             TYPESAFE_API_KEY=${{ secrets.TYPESAFE_API_KEY }}
-            DECISION_GATE=off
+            DECISION_GATE=${{ secrets.DECISION_GATE }}
+            DECISION_GATE_THRESHOLD=${{ secrets.DECISION_GATE_THRESHOLD }}
+            DECISION_STYLE_REVIEW=${{ secrets.DECISION_STYLE_REVIEW }}
             PRINTIFY_API_TOKEN=${{ secrets.PRINTIFY_API_TOKEN }}
             PRINTIFY_SHOP_ID=${{ secrets.PRINTIFY_SHOP_ID }}
             PRINT_PROVIDER=${{ secrets.PRINT_PROVIDER }}
@@ -268,11 +271,10 @@ jobs:
             SELLER_ADDRESS=${{ secrets.SELLER_ADDRESS }}
             SELLER_STATE=${{ secrets.SELLER_STATE }}
           env_vars_update_strategy: overwrite
-          # Gemini models are literal (non-secret) so a deploy never wipes them
-          # (strategy is overwrite). Rollback the image swap by changing
-          # GEMINI_IMAGEN_FAST_MODEL back to gemini-3-pro-image. DECISION_GATE:
-          # off | shadow | enforce (see docs/spike-system-one-decision-models.md);
-          # needs the TYPESAFE_API_KEY repo secret for shadow/enforce.
+          # Gemini model names and DECISION_* flags come from repo secrets (strategy
+          # is overwrite, so Cloud Run values set by hand would be wiped). Rollback the
+          # image swap by setting secret GEMINI_IMAGEN_FAST_MODEL=gemini-3-pro-image.
+          # DECISION_GATE: off | shadow | enforce; DECISION_STYLE_REVIEW: gemini | jev.
           # BASIC_AUTH_USER/PASSWORD deliberately not set here — Razorpay's
           # onboarding needs the site reachable without a password prompt.
           # /admin and /api/admin/* are protected independently by the
